@@ -4,7 +4,7 @@
 
 Все команды выполняются на Windows в **PowerShell от имени администратора**, в каталоге скриптов:
 ```powershell
-cd <папка PRODUCT>\tools\windows
+cd <папка OpenWRT-VM-PROXY>\tools\windows
 ```
 Если политика выполнения блокирует `.ps1`: `powershell -ExecutionPolicy Bypass -File .\имя.ps1` либо один раз `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 

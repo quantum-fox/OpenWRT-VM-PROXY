@@ -2,7 +2,7 @@
 # 05: прозрачный прокси PassWall2 для клиентов LAN (включая Win10 после gateway-on.ps1).
 # "Main switch" (global.enabled) = 1 -> nftables: TCP REDIRECT, UDP TPROXY на выбранный узел для ВСЕХ устройств за LAN.
 # Узел по умолчанию - "POOL leastPing" (общий трафик системы идёт через пул с лучшим пингом).
-# Рабочие приложения (браузер, VS Code) явно направляются на прокси 8081/1081 = USA-via-pool (см. PRODUCT/docs/windows-setup.md).
+# Рабочие приложения (браузер, VS Code) явно направляются на прокси 8081/1081 = USA-via-pool (см. OpenWRT-VM-PROXY/docs/windows-setup.md).
 # localhost_proxy=0: собственный трафик роутера (opkg, пробы, сам xray) идёт напрямую - иначе возможны петли.
 # Переопределить узел: GLOBAL_NODE="USA-via-pool" sh 05-transparent.sh
 C=passwall2

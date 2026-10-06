@@ -23,7 +23,7 @@ ssh openwrt 'pw2-setup status'                             # выходы 1080 �
 
 ### Шаг 2. (по желанию) VS Code через рабочий выход
 ```powershell
-cd <папка PRODUCT>\tools\windows
+cd <папка OpenWRT-VM-PROXY>\tools\windows
 .\vscode-proxy.ps1 -On          # делает резервную копию settings.json рядом
 ```
 В VS Code: `Ctrl+Shift+P` → **Developer: Reload Window**. Проверка во встроенном терминале: `echo $env:HTTPS_PROXY` → `http://10.99.77.1:8081`; `curl.exe -s https://icanhazip.com` → IP вашего сервера. Убрать: `.\vscode-proxy.ps1 -Off` (и Reload Window).
@@ -48,7 +48,7 @@ Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Setti
 ### Шаг 5. Сторож (автозапуск VM и поддержание шлюза)
 PowerShell **от администратора**:
 ```powershell
-cd <папка PRODUCT>\tools\windows
+cd <папка OpenWRT-VM-PROXY>\tools\windows
 .\install-watchdog-task.ps1
 ```
 Создаётся задача `OpenWRT-Gateway-Watchdog` (от вашего пользователя, с повышенными правами, без окна): при входе в Windows и **каждую минуту** она (1) запускает VM `OpenWRT`, если она не работает; (2) если шлюз включён — поддерживает маршруты и DNS; (3) если роутер не отвечает — **fail-open**: выключает шлюз, интернет идёт напрямую; (4) не трогает шлюз при активном туннельном адаптере; (5) если у роутера пропал выход в сеть (нет маршрута по умолчанию 3 минуты подряд, см. [troubleshooting.md](troubleshooting.md), «Роутер не пингует»), корректно перезапускает VM (не чаще раза в 15 минут). Лог: `C:\ProgramData\win-gateway\watchdog.log`.

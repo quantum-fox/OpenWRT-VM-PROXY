@@ -18,12 +18,12 @@
 | Ключи | SSH-ключи хоста и сертификат LuCI создаются заново при первом запуске |
 
 ## Шаг 0. Получите образ
-Если вы получили продукт архивом `PRODUCT-<версия>.zip`, файл `image\pw2-router.ova` уже внутри. Если вы скачали репозиторий с GitHub, образа в нём нет: скачайте `pw2-router.ova` и `pw2-router.ova.sha256` со страницы **Releases** репозитория и положите в папку `image` ([image/README.md](image/README.md)).
+Если вы получили продукт архивом `OpenWRT-VM-PROXY-<версия>.zip`, файл `image\pw2-router.ova` уже внутри. Если вы скачали репозиторий с GitHub, образа в нём нет: скачайте `pw2-router.ova` и `pw2-router.ova.sha256` со страницы **Releases** репозитория и положите в папку `image` ([image/README.md](image/README.md)).
 
 ## Шаг 1. Импорт
 PowerShell **от администратора**:
 ```powershell
-cd <папка PRODUCT>\tools\windows
+cd <папка OpenWRT-VM-PROXY>\tools\windows
 .\vm-import.ps1
 ```
 Скрипт проверяет контрольную сумму, создаёт Host-Only адаптер `10.99.77.2/24` (LAN роутера), импортирует VM `OpenWRT` и привязывает сети: nic1 — Host-Only, nic2 — мост на ваш внешний адаптер (выбирается автоматически; иначе `-WanAdapter "<имя из VBoxManage list bridgedifs>"`). Если политика выполнения блокирует `.ps1`: `powershell -ExecutionPolicy Bypass -File .\vm-import.ps1`.

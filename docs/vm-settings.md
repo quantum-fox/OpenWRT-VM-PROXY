@@ -17,7 +17,7 @@
 ```
 Или скриптом (от администратора; сам выключает роутер, проверяет результат и **автоматически откатывается**, если после перезагрузки нет SSH, адреса `br-lan` или интернета на WAN):
 ```powershell
-cd <папка PRODUCT>\tools\windows
+cd <папка OpenWRT-VM-PROXY>\tools\windows
 .\vm-tune.ps1                              # 2 vCPU + virtio + kvm
 .\vm-tune.ps1 -Cpus 2 -NicType 82540EM     # только vCPU, сеть не менять
 .\vm-tune.ps1 -Rollback                    # вернуть 1 vCPU, e1000, paravirt default

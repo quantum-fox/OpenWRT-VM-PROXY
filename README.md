@@ -47,7 +47,7 @@
 
 ## Состав папки
 ```
-PRODUCT\
+OpenWRT-VM-PROXY\
 ├─ README.md                  — этот файл
 ├─ docs\                      — общая документация (оба варианта), в том числе daily-use.md («что дальше»)
 ├─ tools\
