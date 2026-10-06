@@ -1,0 +1,33 @@
+#!/bin/sh
+# pw2-usa-mode: выход рабочего прокси 8081/1081 в USA - основной (собственный USA) или запасной (USA из подписки).
+#   pw2-usa-mode status   - какой выход сейчас, настройки автопереключения, последние события
+#   pw2-usa-mode backup   - ВРУЧНУЮ закрепить запасной USA (автопереключение отключается; для случая, когда собственный USA нужно обойти намеренно)
+#   pw2-usa-mode auto     - обычный режим: основной USA, при его отказе - автоматически запасной, при восстановлении - обратно
+# Смена режима перезапускает PassWall2 (~10 с).
+C=passwall2
+OWN_ID=""; for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do [ "$(uci -q get $C.$id.remarks)" = "USA-via-pool" ] && OWN_ID=$id; done
+OWN_IP=$(uci -q get $C.$OWN_ID.address)
+BK_ID=$(uci -q get $C.shunt_usa_b.default_node); BK_ADDR=$(uci -q get $C.$BK_ID.address); BK_NAME=$(uci -q get $C.$BK_ID.remarks)
+case "$1" in
+  status|"")
+    ip=$(curl -s -m 20 -x socks5h://127.0.0.1:1081 https://icanhazip.com 2>/dev/null)
+    if [ -z "$ip" ]; then side="НЕТ ОТВЕТА (идёт проверка/переключение или оба USA недоступны)"
+    elif [ "$ip" = "$OWN_IP" ]; then side="ОСНОВНОЙ (собственный USA $OWN_IP)"
+    else side="ЗАПАСНОЙ (USA из подписки: $BK_NAME, $BK_ADDR)"; fi
+    echo "Выход через 1081 сейчас: ${ip:-<нет>}  -> $side"
+    echo "Узел sockB в конфиге:    $(uci -q get $C.sockB.node)   автопереключение: $( [ "$(uci -q get $C.sockB.enable_autoswitch)" = 1 ] && echo "включено (проверка каждые $(uci -q get $C.sockB.autoswitch_testing_time) с, возврат на основной: $( [ "$(uci -q get $C.sockB.autoswitch_restore_switch)" = 1 ] && echo да || echo нет))" || echo ВЫКЛЮЧЕНО )"
+    echo "Запасной узел:           shunt_usa_b -> $BK_ID ($BK_NAME, $BK_ADDR)"
+    echo "Процесс автопереключателя: $(ps w | grep -c '[s]ocks_auto_switch.sh sockB') шт."
+    grep 'Port \[1081\]' /tmp/log/passwall2.log | tail -5 | sed 's/^/  лог: /'
+    ;;
+  backup)
+    uci set $C.sockB.enable_autoswitch=0; uci set $C.sockB.node=shunt_usa_b; uci commit $C
+    /etc/init.d/passwall2 restart >/dev/null 2>&1; sleep 10
+    echo "Закреплён запасной USA. Выход: $(curl -s -m 20 -x socks5h://127.0.0.1:1081 https://icanhazip.com)"
+    ;;
+  auto)
+    pw2-routing-apply | grep -E 'узлы:' ; sleep 2
+    echo "Автоматический режим включён."; pw2-usa-mode status
+    ;;
+  *) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

@@ -1,0 +1,47 @@
+#!/bin/sh
+# pw2-ua-block: полный запрет трафика с/на IP-адреса Украины (geoip:ua) на уровне файрвола роутера (nftables).
+# Действует на ВСЁ, что проходит через роутер или исходит от него, независимо от прокси: прямой трафик клиентов LAN (в т.ч. Win10 через шлюз),
+# соединения самого Xray "напрямую" (freedom), входящие из UA. Таблица `inet ua_block`, хук prerouting (все входящие/транзитные) и output (свой исходящий).
+# Домены .ua/.укр блокируются на уровне Xray (правило rule_ua, скрипт 06), а не здесь.
+# Источник списков: /usr/share/v2ray/geoip.dat (пакет v2ray-geoip, обновляется opkg/PassWall2). Перегенерация: pw2-ua-block (cron раз в неделю).
+# Файл правил: /etc/ua-block.nft; автозагрузка при старте: /etc/init.d/ua-block.   Отключить: /etc/init.d/ua-block stop (и disable).
+GEO=/usr/share/v2ray/geoip.dat
+OUT=/etc/ua-block.nft
+TMP=/tmp/ua-block.list
+[ -x /usr/bin/geoview ] && [ -f "$GEO" ] || { echo "нет geoview или $GEO"; exit 1; }
+
+geoview -type geoip -input "$GEO" -list ua > "$TMP" 2>/dev/null
+# необязательно: /etc/ua-block.exclude - регулярные выражения (egrep, по одному на строку) для диапазонов, которые НЕ блокировать
+# (например CDN-диапазоны, ошибочно помеченные гео-базой как UA). Пример строки:  ^2\.(19|21)\.
+[ -s /etc/ua-block.exclude ] && grep -Ev -f /etc/ua-block.exclude "$TMP" > "$TMP.f" && mv "$TMP.f" "$TMP"
+N=$(wc -l < "$TMP")
+[ "$N" -gt 100 ] || { echo "список UA подозрительно мал ($N) - файл правил не меняю"; exit 1; }
+grep -v ':' "$TMP" | sed '$!s/$/,/' > /tmp/ua4.txt     # IPv4, через запятую
+grep ':'    "$TMP" | sed '$!s/$/,/' > /tmp/ua6.txt     # IPv6
+
+{
+  echo "add table inet ua_block"
+  echo "delete table inet ua_block"                    # идемпотентная пересоздание таблицы
+  echo "table inet ua_block {"
+  echo "  set ua4 { type ipv4_addr; flags interval; auto-merge; elements = {"; cat /tmp/ua4.txt; echo "  } }"
+  echo "  set ua6 { type ipv6_addr; flags interval; auto-merge; elements = {"; cat /tmp/ua6.txt; echo "  } }"
+  echo "  chain pre {"
+  echo "    type filter hook prerouting priority -300; policy accept;"
+  echo "    ip daddr @ua4 counter drop"
+  echo "    ip saddr @ua4 counter drop"
+  echo "    ip6 daddr @ua6 counter drop"
+  echo "    ip6 saddr @ua6 counter drop"
+  echo "  }"
+  echo "  chain out {"
+  echo "    type filter hook output priority -300; policy accept;"
+  echo "    ip daddr @ua4 counter drop"
+  echo "    ip6 daddr @ua6 counter drop"
+  echo "  }"
+  echo "}"
+} > "$OUT"
+
+if nft -c -f "$OUT" 2>/tmp/ua-block.err; then
+  nft -f "$OUT" && echo "ua_block загружен: IPv4 $(grep -c . /tmp/ua4.txt), IPv6 $(grep -c . /tmp/ua6.txt) диапазонов"
+else
+  echo "ОШИБКА в $OUT:"; head -5 /tmp/ua-block.err; exit 1
+fi

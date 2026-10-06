@@ -1,0 +1,32 @@
+#!/bin/sh
+# pw2-geosite - подключение дополнительных списков доменов (например, российской базы рекламы) к стандартному /usr/share/v2ray/geosite.dat.
+# Зачем: PassWall2 при сборке конфига Xray пропускает записи "ext:файл.dat:тег" (в его коде: "Rule currently not support ext:"), а обычные "geosite:тег" использует.
+# Формат geosite - повторяемые записи protobuf, поэтому дополнительный файл можно просто ДОПИСАТЬ в конец geosite.dat (cat): список становится обычным тегом geosite:<тег>.
+# Дополнительные файлы лежат в /usr/share/pw2/data/ и называются geosite_<ТЕГ>.dat (внутри - один список с тегом <ТЕГ>, например geosite_RU-ADS.dat -> geosite:ru-ads).
+#   pw2-geosite merge    дописать недостающие списки в geosite.dat (перед первым слиянием сохраняется чистая копия geosite.dat.base)
+#   pw2-geosite ensure   проверить, что списки на месте (geosite.dat мог быть перезаписан пакетным/ручным обновлением); если нет - слить заново и перезапустить PassWall2
+#   pw2-geosite status   показать, какие списки подключены
+#   pw2-geosite restore  вернуть чистый geosite.dat (без дополнительных списков)
+G=/usr/share/v2ray/geosite.dat; BASE=/usr/share/v2ray/geosite.dat.base; DATA=/usr/share/pw2/data; SIZE=/etc/pw2-geosite.size
+tags() { for f in "$DATA"/geosite_*.dat; do [ -f "$f" ] || continue; b=$(basename "$f" .dat); echo "${b#geosite_}"; done; }
+has() { grep -qa "$1" "$G" 2>/dev/null; }          # тег записан в файле заглавными буквами
+merge() {
+  [ -f "$BASE" ] || cp "$G" "$BASE"
+  n=0
+  for t in $(tags); do
+    has "$t" && continue
+    cat "$DATA/geosite_$t.dat" >> "$G" && { echo "[pw2-geosite] подключён список $t ($(wc -c < "$DATA/geosite_$t.dat") байт)"; n=$((n+1)); }
+  done
+  wc -c < "$G" > "$SIZE"; return $n
+}
+case "$1" in
+  merge) merge; exit 0 ;;
+  ensure)
+    # быстрая проверка по размеру; полная - только если размер изменился
+    [ -f "$SIZE" ] && [ "$(wc -c < "$G")" = "$(cat "$SIZE")" ] && exit 0
+    merge; [ $? -gt 0 ] && { echo "[pw2-geosite] geosite.dat был перезаписан - списки подключены заново, перезапускаю PassWall2"; /etc/init.d/passwall2 restart >/dev/null 2>&1; }
+    exit 0 ;;
+  status|"") echo "geosite.dat: $(wc -c < "$G") байт"; for t in $(tags); do has "$t" && echo "  $t: подключён (geosite:$(echo "$t" | tr 'A-Z' 'a-z'))" || echo "  $t: НЕ подключён (pw2-geosite merge)"; done ;;
+  restore) [ -f "$BASE" ] && cp "$BASE" "$G" && wc -c < "$G" > "$SIZE" && echo "geosite.dat возвращён к чистому (списки отключены; правило рекламы пересоберёт pw2-routing-apply)" || echo "нет копии $BASE" ;;
+  *) echo "Использование: pw2-geosite merge|ensure|status|restore"; exit 1 ;;
+esac

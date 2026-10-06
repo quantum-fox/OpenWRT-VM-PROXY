@@ -1,0 +1,29 @@
+#!/bin/sh
+# pw2-ads - блокировка рекламы и трекеров (по доменам, в Xray).
+#   pw2-ads status   - включена ли блокировка, сколько доменов
+#   pw2-ads on       - включить (ADS_BLOCK=1)
+#   pw2-ads off      - выключить (ADS_BLOCK=0)
+#   pw2-ads allow D  - добавить домен D в исключения (разблокировать: убрать из ADS_DOMAINS, а если его блокирует geosite - создать правило-исключение не получится, тогда отключите блокировку для сайта командой "pw2-ads off")
+# Списки: ADS_GEOSITE (готовый список geosite:category-ads-all) и ADS_DOMAINS (свои домены) в /etc/pw2-routing.conf.
+# Блок работает только для трафика, проходящего через Xray (прокси 1080/1081/8080/8081 и прозрачный режим); трафик напрямую в обход Xray не фильтруется.
+CONF=/etc/pw2-routing.conf
+[ -f "$CONF" ] || { echo "нет $CONF (сначала pw2-setup)"; exit 1; }
+get() { sed -n "s/^$1=\"\(.*\)\".*/\1/p" "$CONF" | head -1; }
+set_ads() {
+  if grep -q '^ADS_BLOCK=' "$CONF"; then sed -i "s/^ADS_BLOCK=.*/ADS_BLOCK=$1/" "$CONF"; else echo "ADS_BLOCK=$1" >> "$CONF"; fi
+  /usr/bin/pw2-routing-apply 2>&1 | sed -n 1,2p
+}
+case "$1" in
+  status|"")
+    a=$(sed -n 's/^ADS_BLOCK=\([01]\).*/\1/p' "$CONF" | head -1); a=${a:-1}
+    echo "блокировка рекламы: $([ "$a" = 1 ] && echo ВКЛ || echo ВЫКЛ)"
+    echo "список geosite: $(get ADS_GEOSITE)"
+    echo "свои домены ($(get ADS_DOMAINS | wc -w)): $(get ADS_DOMAINS)"
+    echo "правило в PassWall2: $(uci -q get passwall2.shunt_pool.rule_ads || echo нет)" ;;
+  on)  set_ads 1 ;;
+  off) set_ads 0 ;;
+  allow) [ -n "$2" ] || { echo "укажите домен"; exit 1; }
+    new=$(get ADS_DOMAINS | tr ' ' '\n' | grep -vxF "$2" | tr '\n' ' ' | sed 's/ $//')
+    sed -i "s|^ADS_DOMAINS=.*|ADS_DOMAINS=\"$new\"|" "$CONF"; /usr/bin/pw2-routing-apply 2>&1 | sed -n 1,2p ;;
+  *) echo "Использование: pw2-ads status|on|off|allow ДОМЕН"; exit 1 ;;
+esac

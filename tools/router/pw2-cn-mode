@@ -1,0 +1,26 @@
+#!/bin/sh
+# pw2-cn-mode: ручное управление маршрутом китайского трафика (8080/1080 и системный трафик через шлюз).
+#   pw2-cn-mode status   - показать режим, текущее правило, результат проверки Китая прямо сейчас
+#   pw2-cn-mode auto     - автоматически: напрямую, пока Китай доступен, иначе через пул (следит служба cn-watch)
+#   pw2-cn-mode direct   - всегда напрямую
+#   pw2-cn-mode proxy    - всегда через пул (если Китай напрямую недоступен - включайте это)
+# Смена режима перезапускает PassWall2 (~10 с).
+CONF=/etc/pw2-routing.conf
+. "$CONF"
+case "$1" in
+  status)
+    cur=$(uci -q get passwall2.shunt_pool.rule_cn)
+    echo "CN_MODE:           ${CN_MODE:-auto}"
+    echo "правило CN сейчас: $cur   ($( [ "$cur" = _direct ] && echo 'напрямую' || echo 'через пул' ))"
+    echo "служба cn-watch:   $(/etc/init.d/cn-watch status 2>&1 | head -1)"
+    ok=0; for u in $CN_PROBES; do code=$(curl -s -m "${CN_PROBE_TIMEOUT:-6}" -o /dev/null -w '%{http_code}' "$u" 2>/dev/null); echo "  проба напрямую: $u -> $code"; case "$code" in 2*|3*) ok=$((ok+1));; esac; done
+    echo "Китай напрямую сейчас: $( [ "$ok" -ge "${CN_PROBE_MIN:-2}" ] && echo ДОСТУПЕН || echo НЕДОСТУПЕН ) ($ok из $(echo $CN_PROBES | wc -w))"
+    tail -4 /root/pw2-cn-watch.log 2>/dev/null | sed 's/^/  лог: /'
+    ;;
+  auto|direct|proxy)
+    sed -i "s/^CN_MODE=.*/CN_MODE=\"$1\"/" "$CONF"
+    [ "$1" = "auto" ] && /etc/init.d/cn-watch restart >/dev/null 2>&1
+    pw2-routing-apply | grep 'CN_MODE'
+    ;;
+  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

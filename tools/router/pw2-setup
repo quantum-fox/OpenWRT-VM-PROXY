@@ -1,0 +1,110 @@
+#!/bin/sh
+# pw2-setup - ввод ваших данных и полная настройка роутера одной командой.
+#   pw2-setup            спросить данные (подписка, ваш сервер), сохранить в /root/secrets.env и применить
+#   pw2-setup apply      применить /root/secrets.env как есть, без вопросов
+#   pw2-setup status     краткая проверка: узлы, выходы 1080/1081, службы
+# Что делает apply (в том числе полностью отключает IPv6: pw2-ipv6 off): скачивает подписку, заменяет заглушки (placeholder-*) вашими узлами, строит пул и цепочку,
+# применяет правила маршрутизации RU/UA/CN, прозрачный режим, файрвол UA, сторож Китая (скрипты 02..08 из /usr/share/pw2).
+# Повторный запуск безопасен (скрипты идемпотентны).
+PW2_DIR=/usr/share/pw2
+SEC=/root/secrets.env
+C=passwall2
+export PW2_DIR
+
+die() { echo "ОШИБКА: $*" >&2; exit 1; }
+[ -d "$PW2_DIR" ] || die "нет $PW2_DIR (не загружены скрипты установки)"
+for f in secrets.env.example 02-subscription-and-nodes.sh 03-pool-sync-install.sh 04-balancer-socks-chain.sh 05-transparent.sh 06-routing-rules.sh 07-ua-firewall.sh 08-cn-fallback.sh; do
+  [ -f "$PW2_DIR/$f" ] || die "нет файла $PW2_DIR/$f"
+done
+
+is_placeholder() { case "$1" in ""|*PLACEHOLDER*|*example.invalid*|*203.0.113.*) return 0;; esac; return 1; }
+getv() { ( . "$SEC" 2>/dev/null; eval "printf '%s' \"\$$1\"" ); }
+ask() {   # $1=имя переменной $2=пояснение; Enter = оставить текущее
+  cur=$(getv "$1")
+  if is_placeholder "$cur"; then show="(не задано)"; else show="(сейчас задано; Enter - оставить)"; fi
+  printf '%s %s\n> ' "$2" "$show"; read -r val
+  [ -n "$val" ] || val="$cur"
+  case "$val" in *"'"*) die "в значении не должно быть символа ' (одинарная кавычка)";; esac
+  eval "NEW_$1='$val'"
+}
+
+setconf() {   # $1=ключ $2=значение в /etc/pw2-pool.conf
+  grep -q "^$1=" /etc/pw2-pool.conf && sed -i "s|^$1=\"[^\"]*\"|$1=\"$2\"|" /etc/pw2-pool.conf
+}
+
+status() {
+  echo "== узлы PassWall2:"
+  for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do
+    echo "   $(uci -q get $C.$id.group) | $(uci -q get $C.$id.remarks) | $(uci -q get $C.$id.address):$(uci -q get $C.$id.port)"
+  done | sort | head -40
+  echo "== выход через 1080 (пул):        $(curl -s -m 25 -x socks5h://127.0.0.1:1080 https://icanhazip.com)"
+  echo "== выход через 1081 (рабочий):    $(curl -s -m 25 -x socks5h://127.0.0.1:1081 https://icanhazip.com)"
+  echo "== sockA=$(uci -q get $C.sockA.node) sockB=$(uci -q get $C.sockB.node) система=$(uci -q get $C.@global[0].node) автопереключение 1081: $(uci -q get $C.sockB.enable_autoswitch)"
+  echo "== cn-watch: $(/etc/init.d/cn-watch status 2>&1 | head -1); таблица ua_block: $(nft list tables 2>/dev/null | grep -c ua_block)"
+}
+
+apply() {
+  [ -f "$SEC" ] || die "нет файла $SEC с вашими данными (подписка, ссылки). Выполните pw2-setup без параметров - он спросит данные и создаст файл"
+  chmod 600 "$SEC"
+  cp "$SEC" /tmp/secrets.env
+  . "$SEC"
+  is_placeholder "$SUB_URL"   && echo "ВНИМАНИЕ: адрес подписки не задан - пул останется на заглушках (интернет через них работать не будет)"
+  is_placeholder "$LINK_WORK" && echo "ВНИМАНИЕ: ссылка рабочего сервера не задана - порт 1081/8081 работать не будет"
+  cp "$PW2_DIR/06-routing-rules.sh" /usr/bin/pw2-routing-apply; chmod +x /usr/bin/pw2-routing-apply
+  cp "$PW2_DIR/pw2-usa-mode" /usr/bin/pw2-usa-mode 2>/dev/null && chmod +x /usr/bin/pw2-usa-mode
+  for t in pw2-ipv6 pw2-ali-mode pw2-ads pw2-update; do cp "$PW2_DIR/$t" /usr/bin/$t 2>/dev/null && chmod +x /usr/bin/$t; done
+
+  [ -f "$PW2_DIR/pw2-geosite" ] && cp "$PW2_DIR/pw2-geosite" /usr/bin/pw2-geosite && chmod +x /usr/bin/pw2-geosite
+  /usr/bin/pw2-geosite merge >/dev/null 2>&1                     # российская база рекламы -> geosite.dat
+  grep -q 'pw2-geosite ensure' /etc/crontabs/root 2>/dev/null || echo '*/15 * * * * /usr/bin/pw2-geosite ensure >/dev/null 2>&1' >> /etc/crontabs/root
+  echo "=== 1/6 подписка и ваши узлы"
+  if is_placeholder "$LINK_WORK"; then sh "$PW2_DIR/02-subscription-and-nodes.sh"; else REPLACE=1 sh "$PW2_DIR/02-subscription-and-nodes.sh"; fi
+  # заглушки убираем, только если подписка дала достаточно узлов
+  real=0; for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do
+    [ "$(uci -q get $C.$id.group)" = "${SUB_REMARK:-subscription}" ] || continue
+    case "$(uci -q get $C.$id.remarks)" in placeholder-*) ;; *) real=$((real+1));; esac
+  done
+  if [ "$real" -ge 5 ]; then
+    for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do
+      case "$(uci -q get $C.$id.remarks)" in placeholder-*) uci delete $C.$id;; esac
+    done
+    uci commit $C; echo "заглушки удалены; узлов подписки: $real"
+  else
+    echo "ВНИМАНИЕ: подписка дала $real узлов (нужно не менее 5) - заглушки оставлены. Проверьте адрес подписки."
+  fi
+  echo "=== 2/6 обновление пула"; sh "$PW2_DIR/03-pool-sync-install.sh"
+  # состав пула следует за введёнными данными (03 не перезаписывает существующий /etc/pw2-pool.conf)
+  setconf SUB_SECTIONS "${SUB_SECTION:-sub1}"; setconf INCLUDE_GROUPS "${SUB_REMARK:-subscription}"
+  if [ -n "$LINK_EXTRA" ]; then setconf EXTRA_REMARKS "${EXTRA_NAME:-own-extra}"; else setconf EXTRA_REMARKS ""; fi
+  echo "=== 3/6 пул, цепочка, порты 1080/1081/8080/8081"; sh "$PW2_DIR/04-balancer-socks-chain.sh"
+  echo "=== 4/6 правила RU/UA/CN и запасной выход"; /usr/bin/pw2-routing-apply
+  echo "=== 5/6 прозрачный режим"; sh "$PW2_DIR/05-transparent.sh"
+  echo "=== 6/6 файрвол UA и сторож Китая"; sh "$PW2_DIR/07-ua-firewall.sh"; sh "$PW2_DIR/08-cn-fallback.sh"
+  rm -f /tmp/secrets.env /tmp/links.conf
+  echo "=== IPv6: полное отключение"; /usr/bin/pw2-ipv6 off 2>&1 | head -3
+  [ -f "$PW2_DIR/VERSION" ] && cp "$PW2_DIR/VERSION" /etc/pw2-version      # свежая установка = текущая версия скриптов
+  echo "=== готово; проверка:"; sleep 5; status
+}
+
+case "$1" in
+  status) status ;;
+  apply)  apply ;;
+  ""|setup)
+    [ -f "$SEC" ] || cp "$PW2_DIR/secrets.env.example" "$SEC"
+    chmod 600 "$SEC"
+    if [ ! -f /etc/pw2-passwd.done ]; then
+      echo "Задайте пароль root для роутера (SSH и веб-интерфейс):"; passwd && touch /etc/pw2-passwd.done
+    fi
+    ask SUB_URL    "Адрес подписки провайдера (https://...):"
+    ask LINK_WORK  "Ссылка vless:// вашего сервера для рабочего выхода (порт 1081/8081):"
+    ask LINK_EXTRA "Необязательно: ссылка vless:// ещё одного вашего сервера для общего пула (Enter - пропустить):"
+    EN=$(getv EXTRA_NAME); [ -n "$NEW_LINK_EXTRA" ] && [ -z "$EN" ] && EN="own-extra"
+    SS=$(getv SUB_SECTION); SR=$(getv SUB_REMARK)
+    {
+      echo "# Секреты. Не публиковать. Применить: pw2-setup apply"
+      echo "SUB_URL='$NEW_SUB_URL'"; echo "SUB_SECTION='${SS:-sub1}'"; echo "SUB_REMARK='${SR:-subscription}'"
+      echo "LINK_WORK='$NEW_LINK_WORK'"; echo "LINK_EXTRA='$NEW_LINK_EXTRA'"; echo "EXTRA_NAME='$EN'"
+    } > "$SEC.new" && mv "$SEC.new" "$SEC"; chmod 600 "$SEC"
+    apply ;;
+  *) echo "Использование: pw2-setup [apply|status]"; exit 1 ;;
+esac

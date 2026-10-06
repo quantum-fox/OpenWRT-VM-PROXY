@@ -1,0 +1,101 @@
+#!/bin/sh
+# pw2-pool-sync - обновляет подписку PassWall2 и пересобирает список узлов балансировщика по правилам.
+# Установка: /usr/bin/pw2-pool-sync (chmod +x). Конфиг: /etc/pw2-pool.conf. Лог: /root/pw2-pool-sync.log
+# ВАЖНО: в имени нет слова "passwall2", иначе PassWall2 сотрёт строку из crontab при перезапуске.
+
+CONF=/etc/pw2-pool.conf
+LOG=/root/pw2-pool-sync.log
+LOCK=/tmp/pw2-pool-sync.lock
+
+# значения по умолчанию (переопределяются в $CONF)
+SUB_SECTIONS="sub1"                 # имена секций subscribe_list в /etc/config/passwall2
+POOL_NODE="pool_ping"               # балансировщик для 1080/8080 и системного трафика (protocol=_balancing)
+POOL_CHAIN_NODE="pool_chain"        # балансировщик - первый хоп цепочки на рабочий сервер (содержит и узлы из EXCLUDE_FROM_PROXY_REGEX)
+EXCLUDE_FROM_PROXY_REGEX=""         # узлы, которые НЕ используются как выход 1080/8080 и системного трафика, но остаются первым хопом цепочки (egrep, без учёта регистра)
+INCLUDE_GROUPS="subscription"        # группы (remark подписки), узлы которых входят в пул (через |)
+EXCLUDE_REGEX='USA'   # remarks, которые в пул НЕ берём (egrep, без учёта регистра)
+EXTRA_REMARKS=""          # узлы по точному remarks из любых групп (через |)
+MIN_NODES=5                         # защита: если подходящих узлов меньше - список не трогаем
+DO_UPDATE=1                         # 1 = сначала скачать подписку, 0 = только пересобрать список
+[ -f "$CONF" ] && . "$CONF"
+[ -n "$PW2_NO_UPDATE" ] && DO_UPDATE=0   # PW2_NO_UPDATE=1 pw2-pool-sync  -> без скачивания подписки
+
+log() { echo "$(date '+%F %T') $*" >> "$LOG"; logger -t pw2-pool-sync "$*"; }
+# хвост лога не растёт бесконечно
+[ -f "$LOG" ] && [ "$(wc -l < "$LOG")" -gt 500 ] && tail -n 200 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+
+# один экземпляр за раз
+if [ -e "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then log "уже выполняется, выход"; exit 0; fi
+echo $$ > "$LOCK"; trap 'rm -f "$LOCK"' EXIT
+
+if [ "$DO_UPDATE" = "1" ]; then
+  for s in $SUB_SECTIONS; do
+    log "обновление подписки [$s]"
+    lua /usr/share/passwall2/subscribe.lua start "$s" manual >/dev/null 2>&1 || log "ОШИБКА обновления [$s] (код $?)"
+  done
+fi
+
+# --- собрать новый список: id|group|remarks
+ROWS=/tmp/pw2-pool.rows; : > "$ROWS"
+for id in $(uci show passwall2 | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do
+  proto=$(uci -q get passwall2.$id.protocol)
+  case "$proto" in _*) continue;; esac           # пропускаем служебные узлы (shunt/balancing)
+  grp=$(uci -q get passwall2.$id.group); rem=$(uci -q get passwall2.$id.remarks)
+  [ -z "$rem" ] && continue
+  printf '%s|%s|%s\n' "$id" "$grp" "$rem" >> "$ROWS"
+done
+
+# --- запасной USA для 8081/1081 (узел shunt_usa_b, см. 06): ID узлов подписки меняются при обновлении -> держим его default_node актуальным
+[ -f /etc/pw2-routing.conf ] && . /etc/pw2-routing.conf          # переменные USA_BACKUP_*
+USA_CHANGED=0
+if [ "${USA_BACKUP:-0}" = "1" ] && [ -n "$(uci -q get passwall2.shunt_usa_b)" ] && [ -n "$USA_BACKUP_GROUP" ]; then
+  want=$(awk -F'|' -v g="$USA_BACKUP_GROUP" -v m="$USA_BACKUP_MATCH" '$2==g && $3 ~ m {print $1; exit}' "$ROWS")
+  cur=$(uci -q get passwall2.shunt_usa_b.default_node)
+  if [ -z "$want" ]; then
+    log "ВНИМАНИЕ: запасной USA не найден в группе '$USA_BACKUP_GROUP' (шаблон '$USA_BACKUP_MATCH'); shunt_usa_b не менялся ($cur)"
+  elif [ "$want" != "$cur" ]; then
+    uci set passwall2.shunt_usa_b.default_node="$want"; uci commit passwall2; USA_CHANGED=1
+    log "запасной USA -> $want ($(grep "^$want|" "$ROWS" | cut -d'|' -f3)), был $cur"
+  fi
+fi
+
+# --- списки: NEW_CHAIN = все подходящие узлы (первый хоп цепочки); NEW = они же без EXCLUDE_FROM_PROXY_REGEX (1080/8080 и система)
+NEW=/tmp/pw2-pool.new; NEWC=/tmp/pw2-pool-chain.new; : > "$NEW"; : > "$NEWC"
+while IFS='|' read -r id grp rem; do
+  take=0
+  echo "|$INCLUDE_GROUPS|" | grep -qF "|$grp|" && ! echo "$rem" | grep -qiE "$EXCLUDE_REGEX" && take=1
+  echo "|$EXTRA_REMARKS|"  | grep -qF "|$rem|" && take=1
+  [ "$take" = 1 ] || continue
+  echo "$id" >> "$NEWC"
+  [ -n "$EXCLUDE_FROM_PROXY_REGEX" ] && echo "$rem" | grep -qiE "$EXCLUDE_FROM_PROXY_REGEX" && continue
+  echo "$id" >> "$NEW"
+done < "$ROWS"
+sort "$NEW"  > "$NEW.sorted"  && mv "$NEW.sorted"  "$NEW"     # (BusyBox: у sort нет рабочего -o)
+sort "$NEWC" > "$NEWC.sorted" && mv "$NEWC.sorted" "$NEWC"
+N=$(wc -l < "$NEW"); NC=$(wc -l < "$NEWC")
+
+if [ "$N" -lt "$MIN_NODES" ]; then log "подходящих узлов всего $N (< $MIN_NODES) - списки балансировщиков НЕ изменены"; exit 1; fi
+
+name() { grep "^$1|" "$ROWS" | cut -d'|' -f3; }
+CHANGED=0
+sync_pool() {   # $1 = имя узла-балансировщика, $2 = файл с новым списком; пишет в UCI при отличиях (без перезапуска)
+  [ -n "$(uci -q get passwall2.$1)" ] || return 0               # узел не создан (старая установка без pool_chain) - пропускаем
+  uci -q get passwall2.$1.balancing_node | tr ' ' '\n' | grep -v '^$' | sort > /tmp/pw2-pool.cur
+  cmp -s "$2" /tmp/pw2-pool.cur && return 0
+  for id in $(grep -vxFf /tmp/pw2-pool.cur "$2"); do log "  [$1] + добавлен: $(name $id)"; done
+  for id in $(grep -vxFf "$2" /tmp/pw2-pool.cur); do log "  [$1] - убран: $(name $id) ($id)"; done
+  uci -q delete passwall2.$1.balancing_node
+  while read -r id; do uci add_list passwall2.$1.balancing_node="$id"; done < "$2"
+  uci commit passwall2
+  log "список $1 обновлён: $(wc -l < "$2") узлов"
+  CHANGED=1
+}
+sync_pool "$POOL_NODE" "$NEW"
+sync_pool "$POOL_CHAIN_NODE" "$NEWC"
+
+if [ "$CHANGED" = 1 ] || [ "$USA_CHANGED" = 1 ]; then
+  log "перезапуск PassWall2 (пул: $N узлов, первый хоп цепочки: $NC)"
+  /etc/init.d/passwall2 restart >/dev/null 2>&1
+else
+  log "списки балансировщиков без изменений (пул $N, цепочка $NC)"
+fi

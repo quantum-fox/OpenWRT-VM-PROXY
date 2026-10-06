@@ -1,0 +1,78 @@
+#!/bin/sh
+# pw2-chain-bench - время ответа рабочего сервера: без цепочки, через КОНКРЕТНЫЕ узлы подписки как первый хоп и через текущий пул первого хопа.
+# Запуск на роутере:  pw2-chain-bench                        (узлы по умолчанию)
+#                     BENCH_NODES="Russia Poland Sweden Germany" ROUNDS=3 REQS=5 pw2-chain-bench
+# BENCH_NODES - ровно 4 подстроки имён узлов подписки. ROUNDS - число прогонов, REQS - запросов в прогоне (в каждом прогоне первый запрос показывает «холодный» старт).
+# Временные узлы и порты 1190-1195 (tst*) создаются и удаляются скриптом; рабочие sockA/sockB не меняются, PassWall2 перезапускается дважды (~10 с). Вывод - строки DATA: cfg round idx connect appconnect ttfb total http.
+# cfg: 0 без цепочки, 1..4 через узлы BENCH_NODES, 5 через пул первого хопа (pool_chain, а если его нет - pool_ping).
+C=passwall2
+ROUNDS=${ROUNDS:-3}; REQS=${REQS:-5}; URL=https://icanhazip.com
+BENCH_NODES=${BENCH_NODES:-Russia Poland Sweden Germany}
+POOLHOP=pool_chain; [ -n "$(uci -q get $C.pool_chain)" ] || POOLHOP=pool_ping
+USA=$(for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do [ "$(uci -q get $C.$id.remarks)" = "USA-via-pool" ] && echo $id; done)
+[ -n "$USA" ] || { echo "нет узла USA-via-pool"; exit 1; }
+find_node() {   # $1 = подстрока в remarks, только группа подписки
+  for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do
+    [ "$(uci -q get $C.$id.group)" = "own" ] && continue
+    uci -q get $C.$id.remarks | grep -q "$1" && { echo $id; return; }
+  done
+}
+set -- $BENCH_NODES
+[ $# -eq 4 ] || { echo "BENCH_NODES должен содержать ровно 4 имени"; exit 1; }
+RU=$(find_node "$1"); PL=$(find_node "$2"); SE=$(find_node "$3"); DE=$(find_node "$4")
+echo "узлы: 1=$1:$RU 2=$2:$PL 3=$3:$SE 4=$4:$DE рабочий=$USA первый хоп по умолчанию=$POOLHOP"
+[ -n "$RU" ] && [ -n "$PL" ] && [ -n "$SE" ] && [ -n "$DE" ] || { echo "не найден один из узлов"; exit 1; }
+
+cleanup() {
+  for n in 0 1 2 3 4 5; do uci -q delete $C.tstn$n; uci -q delete $C.tsts$n; done
+  uci commit $C; /etc/init.d/passwall2 restart >/dev/null 2>&1
+  echo "очищено"
+}
+trap cleanup EXIT
+
+clone_usa() {   # $1 = новое имя, $2 = первый хоп (id узла или пусто = без цепочки)
+  NEW=$1; HOP=$2
+  uci set $C.$NEW=nodes
+  uci show $C.$USA | sed 1d | while IFS= read -r l; do
+    k=${l%%=*}; v=${l#*=}; opt=${k#$C.$USA.}
+    case "$opt" in remarks|chain_proxy|preproxy_node|group) continue;; esac
+    eval "set -- $v"
+    if [ $# -gt 1 ]; then for x in "$@"; do uci add_list $C.$NEW.$opt="$x"; done; else uci set $C.$NEW.$opt="$1"; fi
+  done
+  uci set $C.$NEW.remarks="bench-$NEW"; uci set $C.$NEW.group=own
+  if [ -n "$HOP" ]; then uci set $C.$NEW.chain_proxy=1; uci set $C.$NEW.preproxy_node="$HOP"; else uci set $C.$NEW.chain_proxy=0; fi
+}
+mk_sock() {   # $1 = имя, $2 = узел, $3 = порт
+  uci set $C.$1=socks; uci set $C.$1.enabled=1; uci set $C.$1.node="$2"; uci set $C.$1.bind_local=0
+  uci set $C.$1.port="$3"; uci set $C.$1.http_port="$(( $3 + 1000 ))"; uci set $C.$1.log=0
+}
+clone_usa tstn0 ""
+clone_usa tstn1 "$RU"
+clone_usa tstn2 "$PL"
+clone_usa tstn3 "$SE"
+clone_usa tstn4 "$DE"
+clone_usa tstn5 "$POOLHOP"
+i=0; for n in 0 1 2 3 4 5; do mk_sock tsts$n tstn$n $((1190 + n)); done
+uci commit $C
+/etc/init.d/passwall2 restart >/dev/null 2>&1
+sleep 20
+echo "порты:"; netstat -ltn | grep -E ':119[0-5] ' | wc -l
+for n in 0 1 2 3 4 5; do echo "IP через порт 119$n: $(curl -s -m 25 -x socks5h://127.0.0.1:119$n https://icanhazip.com)"; done
+echo "--- прямое соединение роутера с рабочим сервером (без прокси):"
+WS=$(uci -q get $C.$USA.address)
+ping -c 5 -W 2 $WS 2>&1 | tail -2
+for k in 1 2 3; do curl -s -o /dev/null -m 10 -w "tcp443 connect=%{time_connect}\n" https://$WS/ 2>&1; done
+echo "--- данные: cfg round idx connect appconnect ttfb total httpcode"
+r=1
+while [ $r -le $ROUNDS ]; do
+  for n in 0 1 2 3 4 5; do
+    q=1
+    while [ $q -le $REQS ]; do
+      out=$(curl -s -o /dev/null -m 25 -x socks5h://127.0.0.1:119$n -w '%{time_connect} %{time_appconnect} %{time_starttransfer} %{time_total} %{http_code}' $URL 2>/dev/null)
+      echo "DATA $n $r $q ${out:-fail}"
+      q=$((q+1))
+    done
+  done
+  r=$((r+1))
+done
+echo "готово"

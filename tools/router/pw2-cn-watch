@@ -1,0 +1,41 @@
+#!/bin/sh
+# pw2-cn-watch: сторож доступности Китая. Работает как служба (/etc/init.d/cn-watch), пока CN_MODE=auto в /etc/pw2-routing.conf.
+# Каждые CN_CHECK_INTERVAL секунд роутер САМ (напрямую, минуя прокси) открывает адреса из CN_PROBES.
+#   Китай доступен напрямую  -> правило CN на узле shunt_pool = _direct  (китайский трафик идёт напрямую)
+#   Китай недоступен         -> правило CN = _default (китайский трафик идёт через пул, как весь остальной)
+# Переключение с гистерезисом: CN_FAIL_THRESHOLD неудач подряд -> на пул; CN_OK_THRESHOLD удач подряд -> обратно напрямую.
+# Применение = смена одного параметра в /etc/config/passwall2 и перезапуск PassWall2 (прокси на ~10 секунд недоступны, текущие соединения сбрасываются).
+# Состояние: правило в uci (источник правды) и /etc/pw2-cn.state (чтобы pw2-routing-apply его не сбросил). Лог: logread -e pw2-cn-watch.
+C=passwall2
+CONF=/etc/pw2-routing.conf
+STATE=/etc/pw2-cn.state
+log() { logger -t pw2-cn-watch "$*"; echo "$(date '+%F %T') $*" >> /root/pw2-cn-watch.log; [ -f /root/pw2-cn-watch.log ] && [ "$(wc -l < /root/pw2-cn-watch.log)" -gt 400 ] && tail -n 150 /root/pw2-cn-watch.log > /root/pw2-cn-watch.log.t && mv /root/pw2-cn-watch.log.t /root/pw2-cn-watch.log; }
+
+probe() {   # 0 = Китай доступен напрямую
+  ok=0
+  for u in $CN_PROBES; do
+    code=$(curl -s -m "${CN_PROBE_TIMEOUT:-6}" -o /dev/null -w '%{http_code}' "$u" 2>/dev/null)
+    case "$code" in 2*|3*) ok=$((ok+1));; esac
+  done
+  [ "$ok" -ge "${CN_PROBE_MIN:-2}" ]
+}
+
+switch_to() {   # _direct | _default
+  uci set $C.shunt_pool.rule_cn="$1"; uci commit $C
+  echo "$1" > "$STATE"
+  log "правило CN -> $1 ($( [ "$1" = _direct ] && echo 'Китай доступен, напрямую' || echo 'Китай недоступен напрямую, через пул' )); перезапуск PassWall2"
+  /etc/init.d/passwall2 restart >/dev/null 2>&1
+}
+
+bad=0; good=0
+log "запущен"
+while :; do
+  . "$CONF"
+  if [ "${CN_MODE:-auto}" != "auto" ]; then bad=0; good=0; sleep "${CN_CHECK_INTERVAL:-30}"; continue; fi   # ручной режим: ничего не делаем
+  cur=$(uci -q get $C.shunt_pool.rule_cn)
+  if probe; then good=$((good+1)); bad=0; else bad=$((bad+1)); good=0; fi
+  if [ "$cur" = "_direct" ] && [ "$bad" -ge "${CN_FAIL_THRESHOLD:-3}" ]; then switch_to _default; bad=0; good=0
+  elif [ "$cur" = "_default" ] && [ "$good" -ge "${CN_OK_THRESHOLD:-4}" ]; then switch_to _direct; bad=0; good=0
+  fi
+  sleep "${CN_CHECK_INTERVAL:-30}"
+done

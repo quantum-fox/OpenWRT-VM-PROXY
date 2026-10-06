@@ -1,0 +1,24 @@
+#!/bin/sh
+# pw2-ali-mode - куда направлять AliExpress/Alibaba на 8080/1080 и в системном трафике.
+#   pw2-ali-mode status   - показать текущий режим
+#   pw2-ali-mode direct   - напрямую (по умолчанию; работает, когда российская сеть пускает на Alibaba, например дома)
+#   pw2-ali-mode pool     - через пул (если напрямую режет оператор: белые списки мобильной сети)
+#   pw2-ali-mode node ID  - через конкретный узел/цепочку PassWall2 (ID узла в /etc/config/passwall2)
+# Меняет ALI_ACTION в /etc/pw2-routing.conf и применяет (pw2-routing-apply, перезапуск PassWall2 ~10 с).
+# Домены семейства - ALI_DOMAINS в том же файле. aliexpress.ru и его российский CDN (aestatic.net) требуют российского IP:
+# с зарубежных узлов пула они не открываются, поэтому при режиме "pool" они могут не работать (нужен российский выход).
+CONF=/etc/pw2-routing.conf
+[ -f "$CONF" ] || { echo "нет $CONF (сначала pw2-setup)"; exit 1; }
+cur=$(sed -n 's/^ALI_ACTION="\(.*\)".*/\1/p' "$CONF" | head -1); cur=${cur:-_direct}
+set_action() {
+  if grep -q '^ALI_ACTION=' "$CONF"; then sed -i "s|^ALI_ACTION=.*|ALI_ACTION=\"$1\"|" "$CONF"; else echo "ALI_ACTION=\"$1\"" >> "$CONF"; fi
+  /usr/bin/pw2-routing-apply 2>&1 | sed -n 1,2p
+  echo "ALI_ACTION=$1"
+}
+case "$1" in
+  status|"") case "$cur" in _direct) m="напрямую";; _default) m="через пул";; *) m="через узел $cur";; esac; echo "AliExpress/Alibaba: $m (ALI_ACTION=$cur)"; echo "домены: $(sed -n 's/^ALI_DOMAINS="\(.*\)".*/\1/p' "$CONF" | head -1)" ;;
+  direct) set_action _direct ;;
+  pool)   set_action _default ;;
+  node)   [ -n "$2" ] || { echo "укажите ID узла"; exit 1; }; [ -n "$(uci -q get passwall2.$2)" ] || { echo "нет узла $2"; exit 1; }; set_action "$2" ;;
+  *) echo "Использование: pw2-ali-mode status|direct|pool|node ID"; exit 1 ;;
+esac

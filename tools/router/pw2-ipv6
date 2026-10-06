@@ -1,0 +1,75 @@
+#!/bin/sh
+# pw2-ipv6 - полностью отключить (или вернуть) IPv6 на роутере: нигде не используются IPv6-подключения.
+#   pw2-ipv6 off      отключить: LAN не раздаёт IPv6 (RA/DHCPv6/ULA), нет wan6, ядро без IPv6, DNS не отдаёт AAAA, IPv6-перехват PassWall2 выключен
+#   pw2-ipv6 on       вернуть штатное поведение OpenWrt (по резервной копии не возвращает: заново создаёт ip6assign/ULA, RA и DHCPv6 на LAN)
+#   pw2-ipv6 status   показать, где IPv6 ещё включён (всё должно быть "выкл")
+# Перед изменением делается копия network/dhcp/firewall/passwall2 в /root/*.before-ipv6-<время>. Команда безопасна для повторного запуска.
+# Сеть LAN на 1-3 секунды переподнимается (шлюз Windows в это время работает через fail-open сторожа).
+ts=$(date +%Y%m%d-%H%M%S)
+backup() { for f in network dhcp firewall passwall2; do [ -f /etc/config/$f ] && cp /etc/config/$f /root/$f.before-ipv6-$ts; done; echo "копии настроек: /root/*.before-ipv6-$ts"; }
+
+status() {
+  n=0
+  chk() { printf '%-46s %s\n' "$1" "$2"; }
+  v=$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null); chk "ядро: IPv6 выключен (all.disable_ipv6)" "$([ "$v" = 1 ] && echo ВЫКЛ-ok || echo "ВКЛ ($v)")"
+  chk "адреса IPv6 на интерфейсах (кроме lo)" "$(ip -6 addr 2>/dev/null | grep -c 'inet6' | sed 's/^0$/нет-ok/')"
+  chk "LAN: RA / DHCPv6 / ULA-префикс" "ra=$(uci -q get dhcp.lan.ra) dhcpv6=$(uci -q get dhcp.lan.dhcpv6) ip6assign=$(uci -q get network.lan.ip6assign) ula=$(uci -q get network.globals.ula_prefix)"
+  chk "интерфейс wan6" "$(uci -q get network.wan6.proto || echo нет-ok)"
+  chk "odhcpd (RA/DHCPv6)" "$(/etc/init.d/odhcpd enabled && echo ВКЛ || echo выкл-ok)"
+  chk "DNS: не отдавать AAAA (filter_aaaa)" "$(uci -q get dhcp.@dnsmasq[0].filter_aaaa)"
+  chk "PassWall2: IPv6-перехват" "$(uci -q get passwall2.@global_forwarding[0].ipv6_tproxy)"
+  chk "слушающие IPv6-сокеты" "$(netstat -lnt6 2>/dev/null | grep -c LISTEN | sed 's/^0$/нет-ok/')"
+}
+
+off() {
+  backup
+  uci -q delete network.lan.ip6assign; uci -q delete network.lan.ip6hint; uci -q delete network.globals.ula_prefix
+  uci -q delete network.wan6
+  uci set network.lan.ipv6='0'; uci set network.wan.ipv6='0'
+  uci set dhcp.lan.dhcpv6='disabled'; uci set dhcp.lan.ra='disabled'; uci set dhcp.lan.ndp='disabled'
+  uci -q delete dhcp.lan.ra_slaac; uci -q delete dhcp.lan.ra_flags; uci -q delete dhcp.lan.ra_management
+  uci set dhcp.@dnsmasq[0].filter_aaaa='1'
+  uci set firewall.@defaults[0].disable_ipv6='1'
+  [ -n "$(uci -q get passwall2.@global_forwarding[0])" ] && uci set passwall2.@global_forwarding[0].ipv6_tproxy='0'
+  cat > /etc/sysctl.d/99-pw2-no-ipv6.conf <<'EOF'
+# pw2-ipv6 off: IPv6 нигде не используется
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+EOF
+  # после загрузки ядро возвращает ::1 на lo позже sysctl - гасим его в конце загрузки (rc.local)
+  [ -f /etc/rc.local ] || { echo '# Put your custom commands here that should be executed once'; echo 'exit 0'; } > /etc/rc.local
+  grep -q 'pw2-ipv6' /etc/rc.local || {
+    sed '/^exit 0/d' /etc/rc.local > /tmp/rc.local.new
+    { echo '# pw2-ipv6: IPv6 нигде не используется'; echo 'for i in /proc/sys/net/ipv6/conf/*/disable_ipv6; do echo 1 > $i 2>/dev/null; done'; echo 'exit 0'; } >> /tmp/rc.local.new
+    cat /tmp/rc.local.new > /etc/rc.local; rm -f /tmp/rc.local.new
+  }
+  uci commit network; uci commit dhcp; uci commit firewall; uci commit passwall2
+  /etc/init.d/odhcpd stop 2>/dev/null; /etc/init.d/odhcpd disable 2>/dev/null
+  sysctl -p /etc/sysctl.d/99-pw2-no-ipv6.conf >/dev/null 2>&1
+  for i in $(ls /proc/sys/net/ipv6/conf 2>/dev/null); do echo 1 > /proc/sys/net/ipv6/conf/$i/disable_ipv6 2>/dev/null; done
+  /etc/init.d/network reload; /etc/init.d/dnsmasq restart; /etc/init.d/firewall reload >/dev/null 2>&1
+  sleep 4; echo "IPv6 отключён."; status
+}
+
+on() {
+  backup
+  rm -f /etc/sysctl.d/99-pw2-no-ipv6.conf
+  [ -f /etc/rc.local ] && sed -i '/pw2-ipv6/,+1d' /etc/rc.local
+  uci set network.lan.ip6assign='60'; uci -q delete network.lan.ipv6; uci -q delete network.wan.ipv6
+  [ -n "$(uci -q get network.globals.ula_prefix)" ] || uci set network.globals.ula_prefix='fd00:77:77::/48'
+  uci set dhcp.lan.dhcpv6='server'; uci set dhcp.lan.ra='server'; uci -q delete dhcp.lan.ndp
+  uci set dhcp.@dnsmasq[0].filter_aaaa='0'; uci -q delete firewall.@defaults[0].disable_ipv6
+  uci commit network; uci commit dhcp; uci commit firewall
+  /etc/init.d/odhcpd enable; /etc/init.d/odhcpd start 2>/dev/null
+  for i in $(ls /proc/sys/net/ipv6/conf 2>/dev/null); do echo 0 > /proc/sys/net/ipv6/conf/$i/disable_ipv6 2>/dev/null; done
+  /etc/init.d/network reload; /etc/init.d/dnsmasq restart; /etc/init.d/firewall reload >/dev/null 2>&1
+  echo "IPv6 включён (штатное поведение OpenWrt)."
+}
+
+case "$1" in
+  off) off ;;
+  on) on ;;
+  status|"") status ;;
+  *) echo "Использование: pw2-ipv6 off|on|status"; exit 1 ;;
+esac

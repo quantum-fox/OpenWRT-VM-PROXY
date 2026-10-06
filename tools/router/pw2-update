@@ -1,0 +1,88 @@
+#!/bin/sh
+# pw2-update - обновление уже установленного роутера до версии скриптов, лежащих в /usr/share/pw2 (файл VERSION).
+#   pw2-update status   показать установленную версию, версию скриптов и какие шаги будут выполнены
+#   pw2-update          выполнить все недостающие шаги ПО ПОРЯДКУ (например 1.0.0 -> 1.1.0 -> 1.2.0), версия записывается после каждого шага
+# Скрипты и данные на роутер загружает install-router.ps1 (с Windows) - после этого запускайте pw2-update. Ваши настройки (подписка, ссылки, списки в /etc/pw2-*.conf) не затираются.
+# Обновление идёт отдельным процессом и не прерывается при обрыве SSH (журнал /root/pw2-update.log; после обрыва подождите ~1 минуту и проверьте: pw2-update status).
+# Перед обновлением делается копия настроек: /root/*.before-update-<версия>-<время>. Шаги безопасны для повторного запуска.
+# Установленная версия хранится в /etc/pw2-version; если файла нет (роутер установлен до введения версий) - считается 1.0.0.
+PW2_DIR=/usr/share/pw2
+VF=/etc/pw2-version
+STEPS="1.1.0 1.2.0"        # шаги миграции в порядке возрастания; для каждого ниже есть функция m_<версия с подчёркиваниями>
+NEW=$(cat "$PW2_DIR/VERSION" 2>/dev/null)
+[ -n "$NEW" ] || { echo "нет $PW2_DIR/VERSION: сначала загрузите скрипты (install-router.ps1 на Windows)"; exit 1; }
+CUR=$(cat "$VF" 2>/dev/null); CUR=${CUR:-1.0.0}
+
+vnum() { echo "$1" | awk -F. '{printf "%d%03d%03d", $1, $2, $3}'; }   # 1.2.0 -> 1002000
+log() { echo "[pw2-update] $*"; }
+need() { [ "$(vnum "$1")" -gt "$(vnum "$CUR")" ] && [ "$(vnum "$1")" -le "$(vnum "$NEW")" ]; }
+ensure_conf() { grep -q "^$2=" "$1" 2>/dev/null || echo "$3" >> "$1"; }   # файл, ключ, строка
+
+install_cmds() {   # скопировать команды из /usr/share/pw2 в /usr/bin (и данные: российская база рекламы)
+  for f in pw2-ipv6 pw2-ads pw2-ali-mode pw2-geosite pw2-pool-sync pw2-cn-watch pw2-cn-mode pw2-usa-mode pw2-ua-block pw2-chain-bench pw2-setup pw2-update; do
+    [ -f "$PW2_DIR/$f" ] && { tr -d '\r' < "$PW2_DIR/$f" > /usr/bin/$f.new && mv /usr/bin/$f.new /usr/bin/$f && chmod +x /usr/bin/$f; }
+  done
+  tr -d '\r' < "$PW2_DIR/06-routing-rules.sh" > /usr/bin/pw2-routing-apply && chmod +x /usr/bin/pw2-routing-apply
+}
+
+# ---------------- 1.0.x -> 1.1.0: IPv6 выключен, блокировка рекламы, правило AliExpress/Alibaba, aestatic.net в зоне RU, сторож WAN (на Windows)
+m_1_1_0() {
+  install_cmds
+  ensure_conf /etc/pw2-pool.conf POOL_CHAIN_NODE 'POOL_CHAIN_NODE="pool_chain"'
+  ensure_conf /etc/pw2-pool.conf EXCLUDE_FROM_PROXY_REGEX "EXCLUDE_FROM_PROXY_REGEX=''"
+  [ -n "$(uci -q get passwall2.pool_chain)" ] || { log "создаю пул первого хопа (pool_chain)"; sh "$PW2_DIR/04-balancer-socks-chain.sh" >/dev/null 2>&1; }
+  # aestatic.net (российский CDN AliExpress) - в зону RU; из списка ALI убрать
+  grep -q '^RU_DOMAINS=.*aestatic.net' /etc/pw2-routing.conf || sed -i 's/^RU_DOMAINS="\(.*\)"/RU_DOMAINS="\1 aestatic.net"/' /etc/pw2-routing.conf
+  sed -i '/^ALI_DOMAINS=/s/aestatic.net //' /etc/pw2-routing.conf
+  log "применяю правила (реклама, AliExpress/Alibaba)"; /usr/bin/pw2-routing-apply 2>&1 | sed -n 1,2p
+  log "отключаю IPv6"; /usr/bin/pw2-ipv6 off 2>&1 | sed -n 1,2p
+}
+
+# ---------------- 1.1.x -> 1.2.0: российская база рекламы (ext:geosite_RU.dat)
+m_1_2_0() {
+  install_cmds
+  [ -f "$PW2_DIR/data/geosite_RU-ADS.dat" ] || { log "ВНИМАНИЕ: нет $PW2_DIR/data/geosite_RU-ADS.dat - загрузите файлы командой install-router.ps1 и повторите pw2-update"; return 1; }
+  rm -f /usr/share/v2ray/geosite_RU.dat "$PW2_DIR/data/geosite_RU.dat"      # прежний (нерабочий) способ подключения через ext: и его устаревший файл данных
+  /usr/bin/pw2-geosite merge; log "российская база рекламы подключена к geosite.dat"
+  # страховка: если geosite.dat перезапишут (обновление пакетов), pw2-geosite ensure вернёт списки (запускается из cron раз в 15 минут)
+  grep -q 'pw2-geosite ensure' /etc/crontabs/root 2>/dev/null || echo '*/15 * * * * /usr/bin/pw2-geosite ensure >/dev/null 2>&1' >> /etc/crontabs/root
+  /etc/init.d/cron restart >/dev/null 2>&1
+  ensure_conf /etc/pw2-routing.conf ADS_GEOSITE_RU 'ADS_GEOSITE_RU=1'
+  log "применяю правила"; /usr/bin/pw2-routing-apply 2>&1 | sed -n 1,2p
+}
+
+status() {
+  echo "установлена версия: $CUR"; echo "версия скриптов:    $NEW"
+  todo=""; for v in $STEPS; do need "$v" && todo="$todo $v"; done
+  [ -n "$todo" ] && echo "будут выполнены шаги:$todo" || echo "обновление не требуется"
+}
+
+case "$1" in
+  status) status; exit 0 ;;
+  ""|run) ;;
+  *) echo "Использование: pw2-update [status]"; exit 1 ;;
+esac
+
+# Обновление перезагружает сеть (LAN), из-за чего SSH-соединение может оборваться и убить скрипт на середине. Поэтому реальная работа идёт отдельным
+# процессом с игнорируемыми HUP/PIPE (в BusyBox нет setsid/nohup), который переживает обрыв связи; здесь только показывается его вывод. Полный журнал: /root/pw2-update.log
+if [ "$PW2_UPD_CHILD" != 1 ]; then
+  LOG=/root/pw2-update.log; : > "$LOG"
+  ( trap '' HUP PIPE INT TERM; PW2_UPD_CHILD=1 exec sh "$0" "$@" ) >> "$LOG" 2>&1 < /dev/null &      # игнорируемые сигналы наследуются при exec (setsid/nohup в BusyBox нет)
+  pid=$!; n=1
+  while kill -0 "$pid" 2>/dev/null; do sleep 1; tail -n +$n "$LOG" 2>/dev/null; n=$(( $(wc -l < "$LOG") + 1 )); done
+  tail -n +$n "$LOG" 2>/dev/null; exit 0
+fi
+
+status; echo
+todo=""; for v in $STEPS; do need "$v" && todo="$todo $v"; done
+if [ -z "$todo" ]; then [ "$(vnum "$CUR")" -lt "$(vnum "$NEW")" ] && echo "$NEW" > "$VF"; exit 0; fi
+ts=$(date +%Y%m%d-%H%M%S)
+for f in passwall2 network dhcp firewall; do [ -f /etc/config/$f ] && cp /etc/config/$f /root/$f.before-update-$CUR-$ts; done
+for f in pw2-routing.conf pw2-pool.conf; do [ -f /etc/$f ] && cp /etc/$f /root/$f.before-update-$CUR-$ts; done
+log "копии настроек: /root/*.before-update-$CUR-$ts"
+for v in $todo; do
+  fn="m_$(echo "$v" | tr . _)"
+  log "шаг $v ..."
+  if "$fn"; then echo "$v" > "$VF"; log "шаг $v выполнен, версия $v"; else log "шаг $v НЕ выполнен - остановлено на версии $(cat $VF 2>/dev/null || echo $CUR)"; exit 1; fi
+done
+echo "$NEW" > "$VF"; log "готово: установлена версия $NEW"
