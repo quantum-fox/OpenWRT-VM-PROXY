@@ -1,5 +1,8 @@
 # Прокси-шлюз на OpenWrt + PassWall2 (VirtualBox, Windows)
 
+> **English summary.** A ready-to-use proxy router for Windows + VirtualBox: an OpenWrt VM running PassWall2/Xray that pulls your provider's subscription, picks the fastest node, gives you a second "work" proxy exit through your own server (with automatic backup), applies RU/UA/CN routing rules, blocks ads and trackers, disables IPv6, and can act as a transparent gateway for Windows (with fail-open). Choose **variant A** (build from scratch with scripts) or **variant B** (import a ready image from the Releases page). Updating an existing install: [docs/update.md](docs/update.md). Documentation is in Russian. License: MIT (the bundled Russian ad-list data file is GPL-3.0, see [NOTICE.md](NOTICE.md)).
+
+
 Готовый к сборке «умный» интернет-шлюз: виртуальный роутер, который
 - берёт узлы из **подписки** вашего провайдера, сам обновляет её и выбирает самый быстрый узел (**пул**);
 - даёт **два прокси** для программ: `1080/8080` (общий, через пул) и `1081/8081` (**рабочий**: через пул на **ваш** сервер — выход с вашим постоянным IP);
