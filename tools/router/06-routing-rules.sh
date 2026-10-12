@@ -36,7 +36,8 @@ ensure ADS_BLOCK '# Блокировка рекламы и трекеров (Xra
 ADS_BLOCK=1
 ADS_GEOSITE="geosite:category-ads-all"          # готовый список рекламных доменов мира (~800 правил); пусто = не использовать
 ADS_GEOSITE_EXTRA=""                           # дополнительные списки через пробел, например geosite:custom-ads (файл geosite_CUSTOM-ADS.dat положить в /usr/share/pw2/data/, выполнить pw2-geosite merge)
-ADS_GEOSITE_RU=1                                # 1 = дополнительно российская база рекламы (~150 тыс. доменов, тег RU-ADS, данные /usr/share/pw2/data/geosite_RU-ADS.dat, подключается pw2-geosite); 0 = не использовать
+ADS_GEOSITE_GLOBAL=1                            # 1 = дополнительно полная зарубежная база рекламы и трекеров (~203 тыс. доменов, тег ADS-GLOBAL, файл /usr/share/pw2/data/geosite_ADS-GLOBAL.dat, подключается pw2-geosite); 0 = не использовать
+ADS_GEOSITE_RU=1                                # 1 = дополнительно российская база рекламы (~1,4 тыс. правил, тег ADS-RU, файл /usr/share/pw2/data/geosite_ADS-RU.dat); 0 = не использовать
 ADS_DOMAINS="mc.yandex.ru mc.yandex.com an.yandex.ru yandexadexchange.net adfox.ru adriver.ru ad.mail.ru top-fwz1.mail.ru counter.yadro.ru tns-counter.ru"   # дополнительные рекламные/счётчиковые домены (российские в списке geosite не покрыты)'
 ensure ALI_DOMAINS '# AliExpress/Alibaba: целиком напрямую на 8080/1080 и в системном трафике (на 8081/1081 - как обычно). Нужно, чтобы страница, картинки, API и аналитика сайта шли ОДНИМ путём (с одним IP). Пустое значение отключает правило.
 ALI_DOMAINS="aliexpress.com aliexpress.ru aliexpress.us aliexpress-media.com alicdn.com alicdn.net aliyuncs.com aliyun.com mmstat.com alibabausercontent.com alibaba.com alibaba.net alipay.com alibabadns.com"'
@@ -98,9 +99,11 @@ mk_rule rule_ua 'UA: ua/ukr domains + UA IPs' "$(dl "$UA_DOMAINS" "$UA_GEOSITE")
 ADS_LIST="$(dl "$ADS_DOMAINS" "$ADS_GEOSITE")${NL}"      # $(...) отбрасывает последний перевод строки - возвращаем, иначе следующая строка склеится
 # дополнительные списки (российская база и т. п.): PassWall2 не поддерживает "ext:файл:тег", поэтому pw2-geosite дописывает их в geosite.dat, и они подключаются как geosite:<тег>
 [ -x /usr/bin/pw2-geosite ] && /usr/bin/pw2-geosite merge >/dev/null 2>&1
-if [ "${ADS_GEOSITE_RU:-1}" = "1" ]; then
-  if grep -qa "RU-ADS" /usr/share/v2ray/geosite.dat 2>/dev/null; then ADS_LIST="${ADS_LIST}geosite:ru-ads${NL}"; else echo "ВНИМАНИЕ: российская база рекламы (RU-ADS) не подключена к geosite.dat - пропущена (загрузите данные: install-router.ps1, затем pw2-geosite merge)"; fi
-fi
+for pair in "${ADS_GEOSITE_GLOBAL:-1}:ADS-GLOBAL" "${ADS_GEOSITE_RU:-1}:ADS-RU"; do
+  on=${pair%%:*}; tag=${pair#*:}; low=$(echo "$tag" | tr 'A-Z' 'a-z')
+  [ "$on" = "1" ] || continue
+  if grep -qa "$tag" /usr/share/v2ray/geosite.dat 2>/dev/null; then ADS_LIST="${ADS_LIST}geosite:${low}${NL}"; else echo "ВНИМАНИЕ: база рекламы $tag не подключена к geosite.dat - пропущена (загрузите данные: install-router.ps1, затем pw2-geosite refresh)"; fi
+done
 for t in $ADS_GEOSITE_EXTRA; do   # например geosite:custom-ads (только если такой тег есть в geosite.dat)
   tag=$(echo "${t#geosite:}" | tr 'a-z' 'A-Z')
   if grep -qa "$tag" /usr/share/v2ray/geosite.dat 2>/dev/null; then ADS_LIST="${ADS_LIST}${t}${NL}"; else echo "ВНИМАНИЕ: список $t не найден в geosite.dat - пропущен (pw2-geosite merge)"; fi

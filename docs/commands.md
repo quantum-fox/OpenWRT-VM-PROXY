@@ -13,6 +13,7 @@
 | `pw2-ipv6 off`, `pw2-ipv6 on`, `pw2-ipv6 status` | полностью отключить IPv6 на роутере (по умолчанию так и настроено) / вернуть / показать состояние; копия настроек в `/root/*.before-ipv6-<время>` |
 | `pw2-geosite status`, `merge`, `ensure`, `restore` | дополнительные списки доменов (российская база рекламы) в `geosite.dat`: показать / подключить / проверить и восстановить (cron раз в 15 мин) / вернуть чистый файл — [routing-rules.md](routing-rules.md) |
 | `pw2-update status`, `pw2-update` | версия и обновление до версии загруженных скриптов (все недостающие шаги по порядку, с копиями настроек) — [update.md](update.md) |
+| `pw2-geosite status`, `pw2-geosite refresh` | какие базы рекламы подключены к `geosite.dat` / пересобрать `geosite.dat` из чистой основы и файлов `data/` — [routing-rules.md](routing-rules.md) |
 | `pw2-ads status`, `pw2-ads on`, `pw2-ads off`, `pw2-ads allow <домен>` | блокировка рекламы и трекеров: состояние / включить / выключить / разблокировать свой домен — [routing-rules.md](routing-rules.md) |
 | `pw2-ali-mode <режим>` | режимы: `status`, `direct` (AliExpress/Alibaba напрямую), `pool` (через пул), `node <ID>` (через узел/цепочку) — см. [routing-rules.md](routing-rules.md) |
 | `pw2-usa-mode <режим>` | режимы: `status` (какой выход сейчас), `backup` (закрепить запасной), `auto` (автоматический) — рабочий выход 1081/8081 |

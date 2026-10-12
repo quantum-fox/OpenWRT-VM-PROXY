@@ -37,7 +37,7 @@
 ```powershell
 .\install-router.ps1
 ```
-Ожидаемый вывод: `Готово: скрипты загружены в /usr/share/pw2 (NN файлов). Команда на роутере: pw2-setup`. Скрипт кладёт на роутер скрипты, файл `VERSION` и данные (`data\geosite_RU-ADS.dat`, российская база рекламы). Если скрипты не запускаются из-за политики выполнения: `powershell -ExecutionPolicy Bypass -File .\install-router.ps1`.
+Ожидаемый вывод: `Готово: скрипты загружены в /usr/share/pw2 (NN файлов). Команда на роутере: pw2-setup`. Скрипт кладёт на роутер скрипты, файл `VERSION` и данные (`data\geosite_ADS-GLOBAL.dat`, `data\geosite_ADS-RU.dat` - база рекламы). Если скрипты не запускаются из-за политики выполнения: `powershell -ExecutionPolicy Bypass -File .\install-router.ps1`.
 
 ### Шаг 3. Посмотреть план и выполнить обновление
 Команды выполняются в PowerShell на Windows. **В первый раз** команды `pw2-update` ещё нет в `/usr/bin`, поэтому она запускается из `/usr/share/pw2`:
@@ -84,7 +84,7 @@ curl.exe -s -o NUL -w "%{http_code}" -x http://10.99.77.1:8080 http://doubleclic
 Если у вас уже включён прозрачный шлюз, он останется включённым.
 
 ## 4. Что нового получает пользователь версии 1.0.0
-IPv6 выключен; включена блокировка рекламы (`pw2-ads status`; выключить — `pw2-ads off`, разблокировать свой домен — `pw2-ads allow <домен>`); AliExpress и Alibaba идут отдельным правилом (`pw2-ali-mode status`); загружена российская база рекламы (~149 тыс. доменов); сторож Windows перезапускает VM при пропаже выхода в сеть. Подробности и настройка — [routing-rules.md](routing-rules.md), команды — [commands.md](commands.md).
+IPv6 выключен; включена блокировка рекламы (`pw2-ads status`; выключить — `pw2-ads off`, разблокировать свой домен — `pw2-ads allow <домен>`); AliExpress и Alibaba идут отдельным правилом (`pw2-ali-mode status`); загружена полная база рекламы и трекеров (~205 тыс. доменов); сторож Windows перезапускает VM при пропаже выхода в сеть. Подробности и настройка — [routing-rules.md](routing-rules.md), команды — [commands.md](commands.md).
 
 ## 5. Если что-то пошло не так
 | Симптом | Что делать |
