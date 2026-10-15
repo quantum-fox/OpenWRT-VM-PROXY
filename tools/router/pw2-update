@@ -8,7 +8,7 @@
 # Установленная версия хранится в /etc/pw2-version; если файла нет (роутер установлен до введения версий) - считается 1.0.0.
 PW2_DIR=/usr/share/pw2
 VF=/etc/pw2-version
-STEPS="1.1.0 1.2.0 1.3.0 1.4.0"        # шаги миграции в порядке возрастания; для каждого ниже есть функция m_<версия с подчёркиваниями>
+STEPS="1.1.0 1.2.0 1.3.0 1.4.0 1.5.0"        # шаги миграции в порядке возрастания; для каждого ниже есть функция m_<версия с подчёркиваниями>
 NEW=$(cat "$PW2_DIR/VERSION" 2>/dev/null)
 [ -n "$NEW" ] || { echo "нет $PW2_DIR/VERSION: сначала загрузите скрипты (install-router.ps1 на Windows)"; exit 1; }
 CUR=$(cat "$VF" 2>/dev/null); CUR=${CUR:-1.0.0}
@@ -68,6 +68,12 @@ m_1_4_0() {
   install_cmds
   ensure_conf /etc/pw2-routing.conf ADS_UPDATE_URL 'ADS_UPDATE_URL="https://github.com/quantum-fox/OpenWRT-VM-PROXY-ads/releases/latest/download"   # откуда pw2-ads update берёт базы рекламы (файлы geosite_ADS-*.dat и SHA256SUMS)'
   log "доступна команда pw2-ads update"
+}
+
+# ---------------- 1.4.x -> 1.5.0: pw2-setup reset (настройка узлов и подписки с чистого листа) и подбор имени клиента (User-Agent) для подписки
+m_1_5_0() {
+  install_cmds
+  log "доступны: pw2-setup reset, автоподбор User-Agent подписки"
 }
 
 status() {

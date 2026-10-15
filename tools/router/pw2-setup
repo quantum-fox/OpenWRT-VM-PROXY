@@ -3,6 +3,7 @@
 #   pw2-setup            спросить данные (подписка, ваш сервер), сохранить в /root/secrets.env и применить
 #   pw2-setup apply      применить /root/secrets.env как есть, без вопросов
 #   pw2-setup status     краткая проверка: узлы, выходы 1080/1081, службы
+#   pw2-setup reset      начать с чистого листа: убрать все старые узлы и подписки (копия сохраняется), затем спросить данные и применить
 # Что делает apply (в том числе полностью отключает IPv6: pw2-ipv6 off): скачивает подписку, заменяет заглушки (placeholder-*) вашими узлами, строит пул и цепочку,
 # применяет правила маршрутизации RU/UA/CN, прозрачный режим, файрвол UA, сторож Китая (скрипты 02..08 из /usr/share/pw2).
 # Повторный запуск безопасен (скрипты идемпотентны).
@@ -30,6 +31,17 @@ ask() {   # $1=имя переменной $2=пояснение; Enter = ост
 
 setconf() {   # $1=ключ $2=значение в /etc/pw2-pool.conf
   grep -q "^$1=" /etc/pw2-pool.conf && sed -i "s|^$1=\"[^\"]*\"|$1=\"$2\"|" /etc/pw2-pool.conf
+}
+
+clean_nodes() {   # reset: убрать ВСЕ узлы и подписки, кроме служебных (балансировщики/правила и группа own пересоздаются при apply) - настройка узлов с чистого листа
+  cp /etc/config/$C /root/$C.before-reset-$(date +%Y%m%d-%H%M%S) && echo "копия настроек сохранена в /root/$C.before-reset-*"
+  for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do
+    case "$(uci -q get $C.$id.protocol)" in _*) continue;; esac           # служебные узлы (shunt/balancing) не трогаем
+    [ "$(uci -q get $C.$id.group)" = "own" ] && continue                  # свои узлы группы own пересоздаст apply
+    uci delete $C.$id
+  done
+  for id in $(uci show $C | grep '=subscribe_list$' | cut -d. -f2 | cut -d= -f1); do uci delete $C.$id; done
+  uci commit $C; echo "старые узлы и подписки удалены (будут созданы заново из введённых данных)"
 }
 
 status() {
@@ -89,7 +101,8 @@ apply() {
 case "$1" in
   status) status ;;
   apply)  apply ;;
-  ""|setup)
+  ""|setup|reset)
+    [ "$1" = reset ] && clean_nodes
     [ -f "$SEC" ] || cp "$PW2_DIR/secrets.env.example" "$SEC"
     chmod 600 "$SEC"
     if [ ! -f /etc/pw2-passwd.done ]; then
@@ -106,5 +119,5 @@ case "$1" in
       echo "LINK_WORK='$NEW_LINK_WORK'"; echo "LINK_EXTRA='$NEW_LINK_EXTRA'"; echo "EXTRA_NAME='$EN'"
     } > "$SEC.new" && mv "$SEC.new" "$SEC"; chmod 600 "$SEC"
     apply ;;
-  *) echo "Использование: pw2-setup [apply|status]"; exit 1 ;;
+  *) echo "Использование: pw2-setup [apply|status|reset]"; exit 1 ;;
 esac

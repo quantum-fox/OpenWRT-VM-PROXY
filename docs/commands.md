@@ -13,6 +13,7 @@
 | `pw2-ipv6 off`, `pw2-ipv6 on`, `pw2-ipv6 status` | полностью отключить IPv6 на роутере (по умолчанию так и настроено) / вернуть / показать состояние; копия настроек в `/root/*.before-ipv6-<время>` |
 | `pw2-geosite status`, `merge`, `ensure`, `restore` | дополнительные списки доменов (российская база рекламы) в `geosite.dat`: показать / подключить / проверить и восстановить (cron раз в 15 мин) / вернуть чистый файл — [routing-rules.md](routing-rules.md) |
 | `pw2-update status`, `pw2-update` | версия и обновление до версии загруженных скриптов (все недостающие шаги по порядку, с копиями настроек) — [update.md](update.md) |
+| `pw2-setup reset` | начать с чистого листа: убрать все старые узлы и подписки (копия сохраняется), затем спросить подписку и свой сервер и применить — [update.md](update.md), раздел «Смена подписки» |
 | `pw2-ads update` | скачать свежие базы рекламы из релиза репозитория `OpenWRT-VM-PROXY-ads` (проверка SHA256, подключение, применение правил); можно раз в неделю-месяц — [routing-rules.md](routing-rules.md) |
 | `pw2-geosite status`, `pw2-geosite refresh` | какие базы рекламы подключены к `geosite.dat` / пересобрать `geosite.dat` из чистой основы и файлов `data/` — [routing-rules.md](routing-rules.md) |
 | `pw2-ads status`, `pw2-ads on`, `pw2-ads off`, `pw2-ads allow <домен>` | блокировка рекламы и трекеров: состояние / включить / выключить / разблокировать свой домен — [routing-rules.md](routing-rules.md) |
