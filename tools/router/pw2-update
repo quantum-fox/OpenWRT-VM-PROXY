@@ -8,7 +8,7 @@
 # Установленная версия хранится в /etc/pw2-version; если файла нет (роутер установлен до введения версий) - считается 1.0.0.
 PW2_DIR=/usr/share/pw2
 VF=/etc/pw2-version
-STEPS="1.1.0 1.2.0 1.3.0 1.4.0 1.5.0 1.5.1"        # шаги миграции в порядке возрастания; для каждого ниже есть функция m_<версия с подчёркиваниями>
+STEPS="1.1.0 1.2.0 1.3.0 1.4.0 1.5.0 1.5.1 1.6.0"        # шаги миграции в порядке возрастания; для каждого ниже есть функция m_<версия с подчёркиваниями>
 NEW=$(cat "$PW2_DIR/VERSION" 2>/dev/null)
 [ -n "$NEW" ] || { echo "нет $PW2_DIR/VERSION: сначала загрузите скрипты (install-router.ps1 на Windows)"; exit 1; }
 CUR=$(cat "$VF" 2>/dev/null); CUR=${CUR:-1.0.0}
@@ -19,7 +19,7 @@ need() { [ "$(vnum "$1")" -gt "$(vnum "$CUR")" ] && [ "$(vnum "$1")" -le "$(vnum
 ensure_conf() { grep -q "^$2=" "$1" 2>/dev/null || echo "$3" >> "$1"; }   # файл, ключ, строка
 
 install_cmds() {   # скопировать команды из /usr/share/pw2 в /usr/bin (и данные: российская база рекламы)
-  for f in pw2-ipv6 pw2-ads pw2-ali-mode pw2-geosite pw2-pool-sync pw2-cn-watch pw2-cn-mode pw2-usa-mode pw2-ua-block pw2-chain-bench pw2-setup pw2-update; do
+  for f in pw2-ipv6 pw2-ads pw2-ali-mode pw2-ru-mode pw2-geosite pw2-pool-sync pw2-cn-watch pw2-cn-mode pw2-usa-mode pw2-ua-block pw2-chain-bench pw2-setup pw2-update; do
     [ -f "$PW2_DIR/$f" ] && { tr -d '\r' < "$PW2_DIR/$f" > /usr/bin/$f.new && mv /usr/bin/$f.new /usr/bin/$f && chmod +x /usr/bin/$f; }
   done
   tr -d '\r' < "$PW2_DIR/06-routing-rules.sh" > /usr/bin/pw2-routing-apply && chmod +x /usr/bin/pw2-routing-apply
@@ -81,6 +81,13 @@ m_1_5_1() {
   install_cmds
   n=0; for i in 0 1 2 3 4 5; do for k in tstn tsts; do [ -n "$(uci -q get passwall2.$k$i)" ] && { uci delete passwall2.$k$i; n=$((n+1)); }; done; done
   if [ $n -gt 0 ]; then uci commit passwall2; log "удалены остатки pw2-chain-bench ($n записей), перезапускаю PassWall2"; /etc/init.d/passwall2 restart >/dev/null 2>&1; else log "остатков pw2-chain-bench нет"; fi
+}
+
+# ---------------- 1.5.x -> 1.6.0: pw2-ru-mode (российские ресурсы напрямую / через прокси / через узел)
+m_1_6_0() {
+  install_cmds
+  ensure_conf /etc/pw2-routing.conf RU_ACTION 'RU_ACTION="_direct"'
+  log "применяю правила: российские ресурсы по умолчанию напрямую (как раньше); переключатель: pw2-ru-mode"; /usr/bin/pw2-routing-apply 2>&1 | sed -n 1,2p
 }
 
 status() {
