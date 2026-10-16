@@ -46,6 +46,8 @@ ensure ALI_ACTION '# Куда направлять AliExpress/Alibaba на 8080/
 ALI_ACTION="_direct"'
 ensure RU_ACTION '# Куда направлять ВСЕ российские ресурсы (домены ru/su/рф, geosite:category-ru и IP России) на 8080/1080 и в системном трафике: _direct = напрямую (по умолчанию), _default = через пул (если оператор при белых списках режет российские адреса); или ID узла PassWall2. Переключать: pw2-ru-mode. На 8081/1081 российские ресурсы блокируются всегда
 RU_ACTION="_direct"'
+ensure RU_CHAIN_MATCH '# Режим pw2-ru-mode chain: по какому слову в имени искать российский узел подписки
+RU_CHAIN_MATCH="Russia"'
 ensure SYSTEM_MODE '# Прозрачный режим системы (шлюз Win10): same = те же правила, что на 8080/1080 (узел shunt_pool); ua_only = только блок UA, остальное через пул (узел shunt_global)
 SYSTEM_MODE="same"'
 ensure CN_MODE '# Китай напрямую: auto = напрямую, пока Китай доступен с роутера напрямую, иначе через пул (следит pw2-cn-watch, см. 08); direct = всегда напрямую; proxy = всегда через пул
@@ -131,7 +133,11 @@ mk_shunt() {   # имя remarks default_node
 }
 mk_shunt shunt_pool   'SHUNT pool: RU+CN direct, UA blocked' "$POOL"
 [ "${ADS_BLOCK:-1}" = "1" ] && uci set $C.shunt_pool.rule_ads='_blackhole'
-uci set $C.shunt_pool.rule_ua='_blackhole'; uci set $C.shunt_pool.rule_ru="${RU_ACTION:-_direct}";uci set $C.shunt_pool.rule_cn="$CN_ACT"
+uci set $C.shunt_pool.rule_ua='_blackhole'; RU_EFF="${RU_ACTION:-_direct}"
+if [ "$RU_EFF" = "ru_chain" ]; then   # российские ресурсы через цепочку пул -> российский сервер: узел ru_chain пересобирается из текущей подписки
+  /usr/bin/pw2-ru-mode refresh >/dev/null 2>&1; [ $? = 1 ] && { echo "ВНИМАНИЕ: нет российского узла в подписке - российские ресурсы напрямую (pw2-ru-mode chain после обновления подписки)"; RU_EFF=_direct; }
+fi
+uci set $C.shunt_pool.rule_ru="$RU_EFF";uci set $C.shunt_pool.rule_cn="$CN_ACT"
 [ -n "$ALI_DOMAINS" ] && uci set $C.shunt_pool.rule_ali="${ALI_ACTION:-_direct}"
 mk_shunt shunt_usa    'SHUNT USA: RU+UA blocked'              "$USA"
 [ "${ADS_BLOCK:-1}" = "1" ] && uci set $C.shunt_usa.rule_ads='_blackhole'

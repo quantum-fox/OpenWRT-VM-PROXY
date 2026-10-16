@@ -3,23 +3,62 @@
 #   pw2-ru-mode status   - показать текущий режим
 #   pw2-ru-mode direct   - напрямую (по умолчанию; быстро, работает в домашней сети; сайты, не пускающие иностранные IP, открываются)
 #   pw2-ru-mode proxy    - всё российское через пул (если оператор при белых списках режет российские адреса); сайты, не пускающие иностранные IP (банки, Госуслуги), в этом режиме могут не открываться
+#   pw2-ru-mode list     - показать узлы с их ID (ID берётся из первого столбца) и какой выбран сейчас
+#   pw2-ru-mode chain    - всё российское через ЦЕПОЧКУ: пул -> российский сервер из подписки (для белых списков, когда российский сервер напрямую недоступен, а узлы пула доступны). Российский узел ищется по слову RU_CHAIN_MATCH (по умолчанию Russia); цепочка (узел ru_chain) пересобирается сама при обновлении подписки
 #   pw2-ru-mode node ID  - всё российское через конкретный узел PassWall2 (например российский сервер подписки; ID узла - в /etc/config/passwall2 или pw2-setup status)
 # Меняет RU_ACTION в /etc/pw2-routing.conf и применяет (pw2-routing-apply, перезапуск PassWall2 ~10 с, текущие соединения на миг обрываются).
 # Порты 1081/8081 (рабочий выход) не затрагиваются: российские ресурсы там блокируются всегда.
 CONF=/etc/pw2-routing.conf
 [ -f "$CONF" ] || { echo "нет $CONF (сначала pw2-setup)"; exit 1; }
 cur=$(sed -n 's/^RU_ACTION="\(.*\)".*/\1/p' "$CONF" | head -1); cur=${cur:-_direct}
+POOLCONF=/etc/pw2-pool.conf
+build_chain() {   # создаёт/обновляет узел ru_chain = копия российского узла подписки с первым хопом через пул; код возврата: 0 без изменений, 10 изменён, 1 ошибка
+  MATCH=$(sed -n 's/^RU_CHAIN_MATCH="\(.*\)".*/\1/p' "$CONF" | head -1); MATCH=${MATCH:-Russia}
+  HOP=$(sed -n 's/^POOL_NODE="\(.*\)".*/\1/p' "$POOLCONF" 2>/dev/null | head -1); HOP=${HOP:-pool_ping}
+  [ -n "$(uci -q get passwall2.$HOP)" ] || { echo "нет узла-пула $HOP (сначала pw2-setup)"; return 1; }
+  SRC=""
+  for id in $(uci show passwall2 | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do
+    [ "$(uci -q get passwall2.$id.group)" = "own" ] && continue
+    case "$(uci -q get passwall2.$id.protocol)" in _*|"") continue;; esac
+    uci -q get passwall2.$id.remarks | grep -qiE "$MATCH" && { SRC=$id; break; }
+  done
+  [ -n "$SRC" ] || { echo "в подписке нет узла по шаблону '$MATCH' (RU_CHAIN_MATCH в $CONF)"; return 1; }
+  before=$(uci -q show passwall2.ru_chain)
+  uci -q delete passwall2.ru_chain; uci set passwall2.ru_chain=nodes
+  uci show passwall2.$SRC | sed 1d | while IFS= read -r l; do
+    k=${l%%=*}; v=${l#*=}; opt=${k#passwall2.$SRC.}
+    case "$opt" in remarks|chain_proxy|preproxy_node|group) continue;; esac
+    eval "set -- $v"
+    if [ $# -gt 1 ]; then for x in "$@"; do uci add_list passwall2.ru_chain.$opt="$x"; done; else uci set passwall2.ru_chain.$opt="$1"; fi
+  done
+  uci set passwall2.ru_chain.remarks="RU-via-pool"; uci set passwall2.ru_chain.group=own
+  uci set passwall2.ru_chain.chain_proxy=1; uci set passwall2.ru_chain.preproxy_node="$HOP"
+  uci commit passwall2
+  [ "$before" = "$(uci -q show passwall2.ru_chain)" ] && return 0
+  return 10
+}
 set_action() {
+  [ "$1" = ru_chain ] || { [ -n "$(uci -q get passwall2.ru_chain)" ] && { uci delete passwall2.ru_chain; uci commit passwall2; }; }   # цепочка нужна только в режиме chain
   if grep -q '^RU_ACTION=' "$CONF"; then sed -i "s|^RU_ACTION=.*|RU_ACTION=\"$1\"|" "$CONF"; else echo "RU_ACTION=\"$1\"" >> "$CONF"; fi
   /usr/bin/pw2-routing-apply 2>&1 | sed -n 1,2p
   echo "RU_ACTION=$1"
 }
 case "$1" in
   status|"") case "$cur" in _direct) m="напрямую";; _default) m="через пул";; *) m="через узел $cur ($(uci -q get passwall2.$cur.remarks))";; esac
+    [ "$cur" = ru_chain ] && m="через цепочку: пул -> российский сервер ($(uci -q get passwall2.ru_chain.address))"
     echo "российские ресурсы: $m (RU_ACTION=$cur)"
     echo "правило в PassWall2: $(uci -q get passwall2.shunt_pool.rule_ru)" ;;
+  list) echo "ID | группа | имя | адрес   (выбран сейчас: $cur)"
+    for id in $(uci show passwall2 | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do
+      case "$(uci -q get passwall2.$id.protocol)" in _*|"") continue;; esac
+      [ "$(uci -q get passwall2.$id.group)" = "own" ] && continue
+      echo "$id | $(uci -q get passwall2.$id.group) | $(uci -q get passwall2.$id.remarks) | $(uci -q get passwall2.$id.address)$([ "$id" = "$cur" ] && echo '   <- выбран')"
+    done | sort -t'|' -k3
+    echo "Выбрать: pw2-ru-mode node ID" ;;
+  chain) build_chain; [ $? = 1 ] && exit 1; set_action ru_chain ;;
+  refresh) [ "$cur" = ru_chain ] || exit 0; build_chain >/dev/null 2>&1; exit $? ;;   # вызывается из pw2-routing-apply и pw2-pool-sync
   direct) set_action _direct ;;
   proxy|pool) set_action _default ;;
   node) [ -n "$2" ] || { echo "укажите ID узла"; exit 1; }; [ -n "$(uci -q get passwall2.$2)" ] || { echo "нет узла $2"; exit 1; }; set_action "$2" ;;
-  *) echo "Использование: pw2-ru-mode status|direct|proxy|node ID"; exit 1 ;;
+  *) echo "Использование: pw2-ru-mode status|list|direct|proxy|chain|node ID"; exit 1 ;;
 esac

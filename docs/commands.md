@@ -17,7 +17,7 @@
 | `pw2-ads update` | скачать свежие базы рекламы из релиза репозитория `OpenWRT-VM-PROXY-ads` (проверка SHA256, подключение, применение правил); можно раз в неделю-месяц — [routing-rules.md](routing-rules.md) |
 | `pw2-geosite status`, `pw2-geosite refresh` | какие базы рекламы подключены к `geosite.dat` / пересобрать `geosite.dat` из чистой основы и файлов `data/` — [routing-rules.md](routing-rules.md) |
 | `pw2-ads status`, `pw2-ads on`, `pw2-ads off`, `pw2-ads allow <домен>` | блокировка рекламы и трекеров: состояние / включить / выключить / разблокировать свой домен — [routing-rules.md](routing-rules.md) |
-| `pw2-ru-mode <режим>` | режимы: `status`, `direct` (все российские ресурсы напрямую, по умолчанию), `proxy` (все через пул; для белых списков оператора), `node <ID>` (через конкретный узел); применяет правила, перезапуск PassWall2 ~10 с — [routing-rules.md](routing-rules.md) |
+| `pw2-ru-mode <режим>` | режимы: `status`, `list` (узлы с ID), `direct` (все российские ресурсы напрямую, по умолчанию), `proxy` (все через пул; для белых списков оператора), `chain` (через цепочку пул → российский сервер; когда российский сервер напрямую недоступен), `node <ID>` (через конкретный узел, ID - из `list`); применяет правила, перезапуск PassWall2 ~10 с — [routing-rules.md](routing-rules.md) |
 | `pw2-ali-mode <режим>` | режимы: `status`, `direct` (AliExpress/Alibaba напрямую), `pool` (через пул), `node <ID>` (через узел/цепочку) — см. [routing-rules.md](routing-rules.md) |
 | `pw2-usa-mode <режим>` | режимы: `status` (какой выход сейчас), `backup` (закрепить запасной), `auto` (автоматический) — рабочий выход 1081/8081 |
 | `pw2-pool-sync` | обновить подписку и пересобрать пул (cron `17 */6 * * *`); `PW2_NO_UPDATE=1 pw2-pool-sync` — без скачивания |
@@ -56,7 +56,7 @@ curl.exe --noproxy "*" https://icanhazip.com                  # системны
 | `expand-disk.ps1` | вариант A: расширить корневой раздел на весь диск (автоматические перезагрузки) |
 | `gateway-on.cmd` / `gateway-off.cmd` | включить / выключить прозрачный шлюз (маршруты 0/1 и 128/1 через `10.99.77.1`, DNS на роутер) |
 | `install-watchdog-task.ps1` (админ) | задача `OpenWRT-Gateway-Watchdog`: автозапуск VM, поддержание шлюза, fail-open |
-| `ru-mode.cmd <режим>`, `ru-direct.cmd`, `ru-proxy.cmd` | то же, что `pw2-ru-mode`, с Windows; `ru-direct.cmd` и `ru-proxy.cmd` - «кнопки» двойным щелчком |
+| `ru-mode.cmd <режим>`, `ru-direct.cmd`, `ru-proxy.cmd`, `ru-chain.cmd` | то же, что `pw2-ru-mode`, с Windows; `ru-direct.cmd`, `ru-proxy.cmd`, `ru-chain.cmd` - «кнопки» двойным щелчком |
 | `cn-mode.cmd <режим>` | то же, что `pw2-cn-mode` (`status`, `auto`, `direct`, `proxy`), с Windows |
 | `vscode-proxy.ps1 -On` / `vscode-proxy.ps1 -Off` | включить / выключить VS Code через рабочий выход 8081 |
 | `firefox-proxy.ps1 -ProfileDir … [-Port 1081] [-Off]` | профиль Firefox через SOCKS5 роутера |

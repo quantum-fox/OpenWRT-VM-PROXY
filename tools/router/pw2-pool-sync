@@ -93,7 +93,15 @@ sync_pool() {   # $1 = имя узла-балансировщика, $2 = фай
 sync_pool "$POOL_NODE" "$NEW"
 sync_pool "$POOL_CHAIN_NODE" "$NEWC"
 
-if [ "$CHANGED" = 1 ] || [ "$USA_CHANGED" = 1 ]; then
+# --- цепочка для российских ресурсов (pw2-ru-mode chain): узел ru_chain - копия российского узла подписки, пересобираем после обновления подписки
+RU_CHANGED=0
+if [ "${RU_ACTION:-_direct}" = "ru_chain" ] && [ -x /usr/bin/pw2-ru-mode ]; then
+  /usr/bin/pw2-ru-mode refresh; rc=$?
+  [ $rc = 10 ] && { RU_CHANGED=1; log "российская цепочка (ru_chain) обновлена по подписке"; }
+  [ $rc = 1 ] && log "ВНИМАНИЕ: российский узел для цепочки не найден в подписке (RU_CHAIN_MATCH)"
+fi
+
+if [ "$CHANGED" = 1 ] || [ "$USA_CHANGED" = 1 ] || [ "$RU_CHANGED" = 1 ]; then
   log "перезапуск PassWall2 (пул: $N узлов, первый хоп цепочки: $NC)"
   /etc/init.d/passwall2 restart >/dev/null 2>&1
 else
