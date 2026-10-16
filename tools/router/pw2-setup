@@ -37,9 +37,11 @@ clean_nodes() {   # reset: убрать ВСЕ узлы и подписки, к�
   cp /etc/config/$C /root/$C.before-reset-$(date +%Y%m%d-%H%M%S) && echo "копия настроек сохранена в /root/$C.before-reset-*"
   for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do
     case "$(uci -q get $C.$id.protocol)" in _*) continue;; esac           # служебные узлы (shunt/balancing) не трогаем
+    case "$id" in tstn*) uci delete $C.$id; continue;; esac           # остатки pw2-chain-bench
     [ "$(uci -q get $C.$id.group)" = "own" ] && continue                  # свои узлы группы own пересоздаст apply
     uci delete $C.$id
   done
+  for id in $(uci show $C | grep '=socks$' | cut -d. -f2 | cut -d= -f1); do case "$id" in tsts*) uci delete $C.$id;; esac; done
   for id in $(uci show $C | grep '=subscribe_list$' | cut -d. -f2 | cut -d= -f1); do uci delete $C.$id; done
   uci commit $C; echo "старые узлы и подписки удалены (будут созданы заново из введённых данных)"
 }

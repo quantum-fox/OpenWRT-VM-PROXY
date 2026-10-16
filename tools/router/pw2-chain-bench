@@ -28,7 +28,8 @@ cleanup() {
   uci commit $C; /etc/init.d/passwall2 restart >/dev/null 2>&1
   echo "очищено"
 }
-trap cleanup EXIT
+trap cleanup EXIT HUP INT TERM     # при обрыве SSH скрипт тоже убирает временные узлы
+cleanup_old() { for n in 0 1 2 3 4 5; do uci -q delete $C.tstn$n; uci -q delete $C.tsts$n; done; }; cleanup_old   # остатки прошлого прерванного запуска
 
 clone_usa() {   # $1 = новое имя, $2 = первый хоп (id узла или пусто = без цепочки)
   NEW=$1; HOP=$2
@@ -43,7 +44,7 @@ clone_usa() {   # $1 = новое имя, $2 = первый хоп (id узла 
   if [ -n "$HOP" ]; then uci set $C.$NEW.chain_proxy=1; uci set $C.$NEW.preproxy_node="$HOP"; else uci set $C.$NEW.chain_proxy=0; fi
 }
 mk_sock() {   # $1 = имя, $2 = узел, $3 = порт
-  uci set $C.$1=socks; uci set $C.$1.enabled=1; uci set $C.$1.node="$2"; uci set $C.$1.bind_local=0
+  uci set $C.$1=socks; uci set $C.$1.enabled=1; uci set $C.$1.node="$2"; uci set $C.$1.bind_local=1
   uci set $C.$1.port="$3"; uci set $C.$1.http_port="$(( $3 + 1000 ))"; uci set $C.$1.log=0
 }
 clone_usa tstn0 ""
