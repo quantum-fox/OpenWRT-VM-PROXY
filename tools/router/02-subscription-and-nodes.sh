@@ -35,17 +35,25 @@ case "$SUB_URL" in
          case "$rem" in placeholder-*) continue;; esac
          echo "$rem" | grep -qiE 'не поддерж|not supported|unsupported|обнови|update (the )?app|upgrade|expired|истек|истёк|лимит|traffic' && continue
          n=$((n+1)); done; echo $n; }
+     # Часть провайдеров (например капибара) привязывает подписку к устройству: настоящие узлы отдаются только вместе с HWID (идентификатор устройства в заголовке x-hwid).
+     # Вторым кругом включаем отправку HWID (параметр hwid у подписки PassWall2): HWID считается из MAC-адреса роутера и модели, поэтому он постоянный;
+     # на стороне провайдера роутер занимает одно место в списке устройств подписки (если лимит выбран - освободите устройство в личном кабинете провайдера).
      found=0
-     for UA in "" "v2rayN/7.0" "Happ/2.0" "clash-verge/v1.7.7" "Hiddify/2.0" "sing-box" "passwall2"; do
-       if [ -n "$UA" ]; then uci set $C.$SUB_SECTION.user_agent="$UA"; else uci -q delete $C.$SUB_SECTION.user_agent; fi
-       uci commit $C
-       lua /usr/share/passwall2/subscribe.lua start $SUB_SECTION manual >/dev/null 2>&1
-       cnt=$(good_count)
-       if [ "$cnt" -ge 2 ]; then echo "подписка загружена: $cnt узлов (имя клиента: ${UA:-по умолчанию})"; found=1; break; fi
-       echo "  имя клиента '${UA:-по умолчанию}': настоящих узлов нет ($cnt) - пробую следующее"
+     for HW in 0 1; do
+       [ $found = 1 ] && break
+       if [ $HW = 1 ]; then uci set $C.$SUB_SECTION.hwid=1; echo "  без HWID узлов нет - пробую с отправкой HWID (идентификатора устройства)"; else uci -q delete $C.$SUB_SECTION.hwid; fi
+       for UA in "" "v2rayN/7.0" "Happ/2.0" "clash-verge/v1.7.7" "Hiddify/2.0" "sing-box" "passwall2"; do
+         if [ -n "$UA" ]; then uci set $C.$SUB_SECTION.user_agent="$UA"; else uci -q delete $C.$SUB_SECTION.user_agent; fi
+         uci commit $C
+         lua /usr/share/passwall2/subscribe.lua start $SUB_SECTION manual >/dev/null 2>&1
+         cnt=$(good_count)
+         if [ "$cnt" -ge 2 ]; then echo "подписка загружена: $cnt узлов (имя клиента: ${UA:-по умолчанию}$([ $HW = 1 ] && echo ', с HWID'))"; found=1; break; fi
+         echo "  имя клиента '${UA:-по умолчанию}'$([ $HW = 1 ] && echo ' + HWID'): настоящих узлов нет ($cnt) - пробую следующее"
+         [ $HW = 1 ] && [ "$UA" = "Happ/2.0" ] && break      # с HWID достаточно первых трёх имён: дальше только лишние запросы к провайдеру
+       done
      done
      if [ $found = 0 ]; then
-       uci -q delete $C.$SUB_SECTION.user_agent; uci commit $C
+       uci -q delete $C.$SUB_SECTION.user_agent; uci -q delete $C.$SUB_SECTION.hwid; uci commit $C
        echo "ПРЕДУПРЕЖДЕНИЕ: подписка не дала узлов ни с одним именем клиента. Проверьте адрес (откройте его в браузере: должен показать длинный набор символов или список ссылок vless://) и действие подписки у провайдера."
      fi
      # убрать «служебные» узлы-ответы провайдера, чтобы они не попали в пул
