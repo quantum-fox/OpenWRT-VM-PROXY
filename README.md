@@ -35,6 +35,7 @@
 | 7 | [docs/commands.md](docs/commands.md) | справочник всех команд роутера и Windows | постоянно, как шпаргалка |
 | 8 | [docs/vm-settings.md](docs/vm-settings.md) | параметры VM, расширение диска, откат | при настройке производительности |
 | 9 | [docs/troubleshooting.md](docs/troubleshooting.md) | типичные неполадки и их причины | когда что-то не работает |
+| 9а | [docs/proxmox-usb-modem.md](docs/proxmox-usb-modem.md) | роутер на Proxmox, интернет через телефон по USB (режим «USB-модем») | только если запускаете роутер не в VirtualBox, а на Proxmox |
 | 10 | [docs/update.md](docs/update.md) и [CHANGELOG.md](CHANGELOG.md) | **обновление с более ранней версии** без переустановки (версии, порядок, откат) и что изменилось в каждой версии | когда вышла новая версия |
 
 ## Что понадобится

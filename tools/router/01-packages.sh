@@ -35,6 +35,8 @@ opkg update
 opkg install luci-app-passwall2 luci-i18n-passwall2-ru
 opkg upgrade xray-core                          # версия из фида PassWall2 новее официальной (26.9.x против 24.12.x)
 opkg install kmod-nft-tproxy kmod-nft-socket    # нужны для прозрачного прокси (UDP/TPROXY)
+# телефон в режиме «USB-модем» как WAN (команда pw2-wan; Android: RNDIS/CDC Ethernet): драйверы USB-контроллеров (EHCI/xHCI/UHCI) уже есть в ядре x86_64
+opkg install kmod-usb-net-rndis kmod-usb-net-cdc-ether usbutils
 
 # перезапуск веб-части, чтобы появился раздел Services -> PassWall 2
 rm -rf /tmp/luci-indexcache /tmp/luci-modulecache

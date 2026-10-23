@@ -17,6 +17,7 @@
 | `pw2-ads update` | скачать свежие базы рекламы из релиза репозитория `OpenWRT-VM-PROXY-ads` (проверка SHA256, подключение, применение правил); можно раз в неделю-месяц — [routing-rules.md](routing-rules.md) |
 | `pw2-geosite status`, `pw2-geosite refresh` | какие базы рекламы подключены к `geosite.dat` / пересобрать `geosite.dat` из чистой основы и файлов `data/` — [routing-rules.md](routing-rules.md) |
 | `pw2-ads status`, `pw2-ads on`, `pw2-ads off`, `pw2-ads allow <домен>` | блокировка рекламы и трекеров: состояние / включить / выключить / разблокировать свой домен — [routing-rules.md](routing-rules.md) |
+| `pw2-wan <режим>` | откуда интернет роутеру: `status`, `usb` (телефон в режиме «USB-модем»), `eth [ИМЯ]` (сетевая карта), `hook` — [proxmox-usb-modem.md](proxmox-usb-modem.md) |
 | `pw2-ru-mode <режим>` | режимы: `status`, `list` (узлы с ID), `direct` (все российские ресурсы напрямую, по умолчанию), `proxy` (все через пул; для белых списков оператора), `chain` (через цепочку пул → российский сервер; когда российский сервер напрямую недоступен), `node <ID>` (через конкретный узел, ID - из `list`); применяет правила, перезапуск PassWall2 ~10 с — [routing-rules.md](routing-rules.md) |
 | `pw2-ali-mode <режим>` | режимы: `status`, `direct` (AliExpress/Alibaba напрямую), `pool` (через пул), `node <ID>` (через узел/цепочку) — см. [routing-rules.md](routing-rules.md) |
 | `pw2-usa-mode <режим>` | режимы: `status` (какой выход сейчас), `backup` (закрепить запасной), `auto` (автоматический) — рабочий выход 1081/8081 |

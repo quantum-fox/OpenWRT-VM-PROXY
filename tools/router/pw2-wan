@@ -1,0 +1,68 @@
+#!/bin/sh
+# pw2-wan - откуда роутер получает интернет (интерфейс WAN): сетевая карта или телефон в режиме «USB-модем».
+#   pw2-wan status      - режим, устройство WAN, найденные USB-модемы
+#   pw2-wan usb         - WAN = телефон по USB (Android: режим «USB-модем», RNDIS/CDC; iPhone: ipheth); интерфейс (usb0, eth1 и т. п.) определяется по драйверу и подставляется сам при каждом подключении телефона
+#   pw2-wan eth [ИМЯ]   - WAN = сетевая карта (по умолчанию eth1; ИМЯ - другое устройство, например eth2; имя запоминается)
+#   pw2-wan hook        - (пере)установить обработчик подключения телефона (ставится автоматически)
+# Нужны пакеты kmod-usb-net-rndis, kmod-usb-net-cdc-ether, usbutils (входят в образ с версии 1.8.0; при обновлении ставит pw2-update). Драйверы USB-контроллеров уже есть в ядре.
+# Настройка в /etc/pw2-wan.conf: WAN_MODE=eth|usb, WAN_ETH_DEV=eth1, USB_DRIVERS="rndis_host cdc_ether cdc_ncm ipheth".
+# Телефон виден роутеру только если он передан виртуальной машине целиком (проброс USB-порта в гипервизоре, см. docs/proxmox-usb-modem.md); на самом телефоне после подключения кабеля включите «Режим модема -> USB-модем» (имя пункта зависит от оболочки).
+CONF=/etc/pw2-wan.conf
+HOOK=/etc/hotplug.d/net/30-pw2-wan
+[ -f "$CONF" ] || printf '%s\n' 'WAN_MODE=eth' 'WAN_ETH_DEV=eth1' 'USB_DRIVERS="rndis_host cdc_ether cdc_ncm ipheth"' > "$CONF"
+. "$CONF"
+USB_DRIVERS=${USB_DRIVERS:-rndis_host cdc_ether cdc_ncm ipheth}; WAN_ETH_DEV=${WAN_ETH_DEV:-eth1}
+setconf() { if grep -q "^$1=" "$CONF"; then sed -i "s|^$1=.*|$1=$2|" "$CONF"; else echo "$1=$2" >> "$CONF"; fi; }
+usb_ifaces() {   # имена сетевых интерфейсов, чей драйвер - USB-модем
+  for n in /sys/class/net/*; do i=${n##*/}; d=$(basename "$(readlink "$n/device/driver" 2>/dev/null)")
+    case " $USB_DRIVERS " in *" $d "*) echo "$i";; esac
+  done
+}
+drv() { basename "$(readlink "/sys/class/net/$1/device/driver" 2>/dev/null)"; }
+install_hook() {
+  mkdir -p /etc/hotplug.d/net
+  cat > "$HOOK" <<'EOF'
+#!/bin/sh
+# pw2-wan: при подключении USB-модема (телефона) направить на него интерфейс WAN, если WAN_MODE=usb
+[ "$ACTION" = add ] || exit 0
+[ -f /etc/pw2-wan.conf ] && . /etc/pw2-wan.conf
+[ "${WAN_MODE:-eth}" = usb ] || exit 0
+d=$(basename "$(readlink "/sys/class/net/$INTERFACE/device/driver" 2>/dev/null)")
+for x in ${USB_DRIVERS:-rndis_host cdc_ether cdc_ncm ipheth}; do
+  if [ "$d" = "$x" ]; then
+    [ "$(uci -q get network.wan.device)" = "$INTERFACE" ] || { uci set network.wan.device="$INTERFACE"; uci commit network; }
+    logger -t pw2-wan "USB-модем $INTERFACE ($d): WAN переключён на него"
+    ( sleep 3; ifup wan ) >/dev/null 2>&1 &
+    exit 0
+  fi
+done
+EOF
+  chmod +x "$HOOK"
+}
+apply_wan() {   # $1 = устройство
+  uci set network.wan=interface; uci set network.wan.device="$1"; uci set network.wan.proto=dhcp; uci set network.wan.ipv6=0
+  uci commit network
+  ubus call network reload >/dev/null 2>&1; sleep 2; ifup wan >/dev/null 2>&1
+}
+case "$1" in
+  status|"")
+    echo "режим WAN: $WAN_MODE (WAN_MODE в $CONF); устройство WAN сейчас: $(uci -q get network.wan.device)"
+    echo "обработчик подключения телефона: $([ -x "$HOOK" ] && echo установлен || echo 'НЕ установлен (pw2-wan hook)')"
+    u=$(usb_ifaces)
+    if [ -n "$u" ]; then for i in $u; do echo "USB-модем: $i (драйвер $(drv $i)), адрес: $(ip -4 -o addr show "$i" 2>/dev/null | awk '{print $4}' | head -1)"; done
+    else echo "USB-модемов не найдено (телефон не подключён или не передан VM, либо на телефоне не включён режим USB-модема)"; fi
+    echo "USB-устройства, которые видит роутер:"; (lsusb 2>/dev/null || echo "  (нет lsusb: opkg install usbutils)") | sed 's/^/  /'
+    echo "выход в интернет: $(ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1 && echo есть || echo НЕТ)" ;;
+  usb)
+    setconf WAN_MODE usb; install_hook
+    u=$(usb_ifaces | head -1)
+    if [ -n "$u" ]; then apply_wan "$u"; echo "WAN = USB-модем $u"
+    else apply_wan usb0; echo "USB-модема пока нет: WAN временно usb0. Подключите телефон, включите на нём режим USB-модема - интерфейс подставится сам (pw2-wan status)"; fi ;;
+  eth)
+    dev=${2:-$WAN_ETH_DEV}
+    ip link show "$dev" >/dev/null 2>&1 || { echo "нет сетевого интерфейса $dev (список: $(ls /sys/class/net | tr '
+' ' '))"; exit 1; }   # защита: не оставлять WAN на несуществующем устройстве
+    setconf WAN_MODE eth; setconf WAN_ETH_DEV "$dev"; apply_wan "$dev"; echo "WAN = сетевая карта $dev" ;;
+  hook) install_hook; echo "обработчик установлен: $HOOK" ;;
+  *) echo "Использование: pw2-wan status|usb|eth [ИМЯ]|hook"; exit 1 ;;
+esac
