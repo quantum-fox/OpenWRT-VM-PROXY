@@ -1,0 +1,60 @@
+#!/bin/sh
+# pw2-device - выбор выхода для отдельных устройств в прозрачном режиме (подключили устройство к сети роутера - интернет у него уже есть через прокси; здесь можно переопределить выход для конкретного устройства или порта).
+#   pw2-device list                       - правила по устройствам
+#   pw2-device set ИМЯ ИСТОЧНИК РЕЖИМ     - создать или изменить правило
+#   pw2-device del ИМЯ                    - удалить правило
+#   pw2-device on | off                   - включить / выключить выбор выхода по устройствам (правила сохраняются)
+# ИСТОЧНИК: IP-адрес (10.99.77.50), диапазон адресов (10.99.77.50-10.99.77.60), подсеть (10.99.77.64/28), MAC-адрес (aa:bb:cc:dd:ee:ff) или интерфейс if:ИМЯ (например if:eth2 - всё, что подключено к этому порту/мосту); несколько - через запятую.
+# РЕЖИМ: pool   - через пул, как у остальных (правила RU/CN/UA, блокировка рекламы) - узел shunt_pool
+#        work   - через рабочий выход (ваш сервер, российские ресурсы блокируются) - узел shunt_usa
+#        direct - мимо прокси, напрямую (камеры, умный дом, устройства, которым прокси мешает)
+# Устройства без правила идут по умолчанию (прозрачный режим, узел shunt_pool). Прозрачный режим должен быть включён (Main switch).
+# Память: каждое правило с режимом pool/work запускает отдельный процесс Xray (около 50 МБ при полной базе рекламы): для двух и более таких правил выделите VM 512 МБ ОЗУ. direct процессов не требует.
+C=passwall2
+die() { echo "ОШИБКА: $*" >&2; exit 1; }
+sid() { echo "pw2dev_$(echo "$1" | tr -c 'A-Za-z0-9_\n-' '_')"; }
+apply() { uci commit $C; echo "применяю (перезапуск PassWall2; правило начнёт действовать через ~30 с)..."; /etc/init.d/passwall2 restart >/dev/null 2>&1; echo готово; }
+node_of() { case "$1" in pool) echo shunt_pool;; work) echo shunt_usa;; esac; }
+case "$1" in
+  list|"")
+    echo "выбор выхода по устройствам: $([ "$(uci -q get $C.@global[0].acl_enable)" = 1 ] && echo ВКЛ || echo ВЫКЛ)"
+    n=0
+    for s in $(uci show $C | grep '^passwall2\.pw2dev_.*=acl_rule' | cut -d. -f2 | cut -d= -f1); do
+      n=$((n+1)); m=$(uci -q get $C.$s.mode); src=$(uci -q get $C.$s.sources); i=$(uci -q get $C.$s.interface)
+      case "$m" in 0) r="напрямую (без прокси)";; *) r="через $(uci -q get $C.$s.node)";; esac
+      echo "  $(uci -q get $C.$s.remarks | sed 's/^pw2: //'): источник [${src}${i:+ интерфейс $i}] -> $r$([ "$(uci -q get $C.$s.enabled)" = 1 ] || echo ' (выключено)')"
+    done
+    [ $n = 0 ] && echo "  правил нет (все устройства идут через пул по умолчанию)" ;;
+  set)
+    [ $# -eq 4 ] || die "использование: pw2-device set ИМЯ ИСТОЧНИК pool|work|direct"
+    name=$2; src=$3; mode=$4; s=$(sid "$name")
+    case "$mode" in pool|work|direct) ;; *) die "режим: pool, work или direct";; esac
+    [ "$mode" = direct ] || [ -n "$(uci -q get $C.$(node_of $mode))" ] || die "нет узла $(node_of $mode) (сначала pw2-setup)"
+    uci -q delete $C.$s; uci set $C.$s=acl_rule
+    uci set $C.$s.enabled=1; uci set $C.$s.remarks="pw2: $name"
+    iface=""; for x in $(echo "$src" | tr ',' ' '); do
+      case "$x" in if:*) iface=${x#if:};; *) uci add_list $C.$s.sources="$x";; esac
+    done
+    [ -n "$iface" ] && uci set $C.$s.interface="$iface"
+    [ -n "$(uci -q get $C.$s.sources)" ] || [ -n "$iface" ] || die "не указан источник"
+    uci set $C.$s.tcp_redir_ports='1:65535'; uci set $C.$s.udp_redir_ports='1:65535'
+    if [ "$mode" = direct ]; then uci set $C.$s.mode=0
+    else
+      uci set $C.$s.mode=1; uci set $C.$s.node="$(node_of $mode)"
+      # настройки DNS правила - как у основного прозрачного режима
+      for k in direct_dns_query_strategy remote_dns_protocol remote_dns remote_dns_query_strategy remote_dns_detour remote_dns_doh; do
+        v=$(uci -q get $C.@global[0].$k); [ -n "$v" ] && uci set $C.$s.$k="$v"
+      done
+    fi
+    uci set $C.@global[0].acl_enable=1
+    echo "правило '$name': источник $src -> $mode"; apply ;;
+  del)
+    [ -n "$2" ] || die "использование: pw2-device del ИМЯ"; s=$(sid "$2")
+    [ -n "$(uci -q get $C.$s)" ] || die "нет правила '$2' (pw2-device list)"
+    uci delete $C.$s; left=$(uci show $C | grep -c '=acl_rule$')
+    [ "$left" = 0 ] && uci set $C.@global[0].acl_enable=0
+    echo "правило '$2' удалено"; apply ;;
+  on)  uci set $C.@global[0].acl_enable=1; apply ;;
+  off) uci set $C.@global[0].acl_enable=0; apply ;;
+  *) echo "Использование: pw2-device list|set ИМЯ ИСТОЧНИК pool|work|direct|del ИМЯ|on|off"; exit 1 ;;
+esac
