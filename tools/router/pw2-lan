@@ -1,0 +1,59 @@
+#!/bin/sh
+# pw2-lan - подключить физический порт (сетевую карту) как ещё одну сеть роутера (LAN): подключённые к порту устройства получают адрес и интернет через прокси без настройки (прозрачный режим, см. docs/devices.md).
+#   pw2-lan status                    - дополнительные порты, их адреса, выданные адреса
+#   pw2-lan add ПОРТ [АДРЕС/ПРЕФИКС]  - подключить порт (например eth2) отдельной сетью роутера
+#   pw2-lan del ПОРТ                  - отключить порт
+# Без адреса порту дают сеть 10.99.88.0/24 (роутер 10.99.88.1, DHCP 10.99.88.100-199; следующий порт - 10.99.89.0/24 и т. д.).
+# С адресом (например 192.168.100.1/24) роутер получает этот адрес в сети порта, а DHCP на порту НЕ включается: так подключают устройства со СТАТИЧЕСКИМИ адресами (адреса 192.168.100.x, шлюз 192.168.100.1 - заработают без перенастройки). DHCP на таком порту можно включить: pw2-lan add ПОРТ АДРЕС/ПРЕФИКС dhcp.
+# Порт - это отдельный маршрутизируемый интерфейс (не мост): так работает и мост VirtualBox, у которого нельзя пропускать чужие MAC-адреса. Порт входит в зону файрвола lan: устройства видят основную сеть 10.99.77.0/24 и наоборот.
+# Настройки запоминаются в /etc/pw2-lan.conf.
+# ВНИМАНИЕ: не подключайте порт к сети, где уже есть свой DHCP-сервер (домашний роутер), если на порту включён DHCP.
+CONF=/etc/pw2-lan.conf
+touch "$CONF"
+die() { echo "ОШИБКА: $*" >&2; exit 1; }
+ifname() { echo "lan_$1"; }
+zone_lan() { for z in $(uci show firewall | grep "=zone$" | cut -d. -f2 | cut -d= -f1); do [ "$(uci -q get firewall.$z.name)" = lan ] && { echo "$z"; return; }; done; }
+reload_all() { uci commit network; uci commit dhcp; uci commit firewall; ubus call network reload >/dev/null 2>&1; /etc/init.d/firewall reload >/dev/null 2>&1; /etc/init.d/dnsmasq restart >/dev/null 2>&1; sleep 3; }
+case "$1" in
+  status|"")
+    echo "дополнительные порты (pw2-lan):"
+    n=0; for i in $(uci show network | grep "^network\.lan_.*=interface" | cut -d. -f2 | cut -d= -f1); do
+      n=$((n+1)); d=$(uci -q get network.$i.device)
+      echo "  $d: роутер $(uci -q get network.$i.ipaddr), DHCP $([ "$(uci -q get dhcp.$i.ignore)" = 1 ] || [ -z "$(uci -q get dhcp.$i)" ] && echo выключен || echo включён), связь $(cat /sys/class/net/$d/operstate 2>/dev/null || echo нет)"
+    done; [ $n = 0 ] && echo "  нет"
+    echo "основная сеть: $(uci -q get network.lan.ipaddr) (порты моста: $(uci -q get network.@device[0].ports))"
+    echo "выданные адреса (DHCP):"; awk '{print "  "$3"  "$4"  "$2}' /tmp/dhcp.leases 2>/dev/null | head -20 ;;
+  add)
+    p=$2; a=$3; mode=$4; [ -n "$p" ] || die "использование: pw2-lan add ПОРТ [АДРЕС/ПРЕФИКС] [dhcp|nodhcp]"
+    ip link show "$p" >/dev/null 2>&1 || die "нет сетевого интерфейса $p (список: $(ls /sys/class/net | tr '\n' ' '))"
+    [ "$p" = "$(uci -q get network.wan.device)" ] && die "$p сейчас WAN (интернет), его нельзя использовать как LAN"
+    uci -q get network.@device[0].ports | tr ' ' '\n' | grep -qx "$p" && die "$p уже в основной сети (мост br-lan)"
+    i=$(ifname "$p")
+    if [ -z "$a" ]; then
+      k=88; while uci show network | grep -q "ipaddr='10.99.$k.1/24'"; do k=$((k+1)); done
+      a="10.99.$k.1/24"; [ -n "$mode" ] || mode=dhcp
+    else
+      case "$a" in */*) ;; *) die "адрес укажите с префиксом, например 192.168.100.1/24";; esac
+      [ -n "$mode" ] || mode=nodhcp
+    fi
+    case "$mode" in dhcp|nodhcp) ;; *) die "четвёртый параметр: dhcp или nodhcp";; esac
+    uci -q delete network.$i; uci set network.$i=interface
+    uci set network.$i.device="$p"; uci set network.$i.proto=static; uci set network.$i.ipaddr="$a"; uci set network.$i.ipv6=0
+    Z=$(zone_lan); [ -n "$Z" ] || die "не найдена зона файрвола lan"
+    uci -q get firewall.$Z.network | tr ' ' '\n' | grep -qx "$i" || uci add_list firewall.$Z.network="$i"
+    uci -q delete dhcp.$i
+    uci set dhcp.$i=dhcp; uci set dhcp.$i.interface="$i"; uci set dhcp.$i.dhcpv6=disabled; uci set dhcp.$i.ra=disabled
+    if [ "$mode" = dhcp ]; then uci set dhcp.$i.start=100; uci set dhcp.$i.limit=100; uci set dhcp.$i.leasetime=12h; uci set dhcp.$i.dhcpv4=server
+    else uci set dhcp.$i.ignore=1; fi
+    sed -i "/^port=$p /d" "$CONF"; echo "port=$p addr=$a dhcp=$mode" >> "$CONF"
+    reload_all; echo "порт $p подключён: роутер $a, DHCP: $([ "$mode" = dhcp ] && echo включён || echo выключен)"
+    echo "Устройства в этом порту: $([ "$mode" = dhcp ] && echo "адрес по DHCP, шлюз и DNS - роутер" || echo "со статическим адресом из этой сети, шлюз и DNS - ${a%/*}")" ;;
+  del)
+    p=$2; [ -n "$p" ] || die "использование: pw2-lan del ПОРТ"; i=$(ifname "$p")
+    [ -n "$(uci -q get network.$i)" ] || die "порт $p не подключён через pw2-lan"
+    Z=$(zone_lan); [ -n "$Z" ] && uci -q del_list firewall.$Z.network="$i"
+    uci -q delete network.$i; uci -q delete dhcp.$i
+    sed -i "/^port=$p /d" "$CONF"
+    reload_all; echo "порт $p отключён" ;;
+  *) echo "Использование: pw2-lan status|add ПОРТ [АДРЕС/ПРЕФИКС] [dhcp|nodhcp]|del ПОРТ"; exit 1 ;;
+esac

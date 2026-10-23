@@ -39,7 +39,7 @@ function Test-Vm {
   return $o
 }
 function Test-Wan {   # интернет на WAN-карте роутера (ping 1.1.1.1), ждём до ~90 с (DHCP после смены карты)
-  for ($i = 0; $i -lt 18; $i++) { ssh -o BatchMode=yes -o ConnectTimeout=6 openwrt "ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1" 2>$null; if ($LASTEXITCODE -eq 0) { return $true }; Start-Sleep 5 }
+  for ($i = 0; $i -lt 18; $i++) { ssh -o BatchMode=yes -o ConnectTimeout=6 openwrt "ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1 || curl -s -m 8 -o /dev/null http://1.1.1.1/" 2>$null; if ($LASTEXITCODE -eq 0) { return $true }; Start-Sleep 5 }
   return $false
 }
 function Apply-Settings($c, $n, $p) {

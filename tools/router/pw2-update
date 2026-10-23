@@ -8,7 +8,7 @@
 # Установленная версия хранится в /etc/pw2-version; если файла нет (роутер установлен до введения версий) - считается 1.0.0.
 PW2_DIR=/usr/share/pw2
 VF=/etc/pw2-version
-STEPS="1.1.0 1.2.0 1.3.0 1.4.0 1.5.0 1.5.1 1.6.0 1.7.0 1.7.1 1.8.0 1.9.0"        # шаги миграции в порядке возрастания; для каждого ниже есть функция m_<версия с подчёркиваниями>
+STEPS="1.1.0 1.2.0 1.3.0 1.4.0 1.5.0 1.5.1 1.6.0 1.7.0 1.7.1 1.8.0 1.9.0 1.10.0"        # шаги миграции в порядке возрастания; для каждого ниже есть функция m_<версия с подчёркиваниями>
 NEW=$(cat "$PW2_DIR/VERSION" 2>/dev/null)
 [ -n "$NEW" ] || { echo "нет $PW2_DIR/VERSION: сначала загрузите скрипты (install-router.ps1 на Windows)"; exit 1; }
 CUR=$(cat "$VF" 2>/dev/null); CUR=${CUR:-1.0.0}
@@ -19,7 +19,7 @@ need() { [ "$(vnum "$1")" -gt "$(vnum "$CUR")" ] && [ "$(vnum "$1")" -le "$(vnum
 ensure_conf() { grep -q "^$2=" "$1" 2>/dev/null || echo "$3" >> "$1"; }   # файл, ключ, строка
 
 install_cmds() {   # скопировать команды из /usr/share/pw2 в /usr/bin (и данные: российская база рекламы)
-  for f in pw2-ipv6 pw2-ads pw2-ali-mode pw2-ru-mode pw2-wan pw2-device pw2-geosite pw2-pool-sync pw2-cn-watch pw2-cn-mode pw2-usa-mode pw2-ua-block pw2-chain-bench pw2-setup pw2-update; do
+  for f in pw2-ipv6 pw2-ads pw2-ali-mode pw2-ru-mode pw2-wan pw2-device pw2-lan pw2-geosite pw2-pool-sync pw2-cn-watch pw2-cn-mode pw2-usa-mode pw2-ua-block pw2-chain-bench pw2-setup pw2-update; do
     [ -f "$PW2_DIR/$f" ] && { tr -d '\r' < "$PW2_DIR/$f" > /usr/bin/$f.new && mv /usr/bin/$f.new /usr/bin/$f && chmod +x /usr/bin/$f; }
   done
   tr -d '\r' < "$PW2_DIR/06-routing-rules.sh" > /usr/bin/pw2-routing-apply && chmod +x /usr/bin/pw2-routing-apply
@@ -118,6 +118,12 @@ m_1_8_0() {
 m_1_9_0() {
   install_cmds
   log "доступна команда pw2-device (выход по устройствам); настройки маршрутизации не менялись"
+}
+
+# ---------------- 1.9.x -> 1.10.0: pw2-lan (добавить физический порт в LAN: устройства получают интернет через прокси без настройки)
+m_1_10_0() {
+  install_cmds
+  log "доступна команда pw2-lan (порт в LAN); настройки сети не менялись"
 }
 
 status() {

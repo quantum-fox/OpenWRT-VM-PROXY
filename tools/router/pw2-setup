@@ -66,7 +66,7 @@ apply() {
   is_placeholder "$LINK_WORK" && echo "ВНИМАНИЕ: ссылка рабочего сервера не задана - порт 1081/8081 работать не будет"
   cp "$PW2_DIR/06-routing-rules.sh" /usr/bin/pw2-routing-apply; chmod +x /usr/bin/pw2-routing-apply
   cp "$PW2_DIR/pw2-usa-mode" /usr/bin/pw2-usa-mode 2>/dev/null && chmod +x /usr/bin/pw2-usa-mode
-  for t in pw2-ipv6 pw2-ali-mode pw2-ru-mode pw2-wan pw2-device pw2-ads pw2-update; do cp "$PW2_DIR/$t" /usr/bin/$t 2>/dev/null && chmod +x /usr/bin/$t; done
+  for t in pw2-ipv6 pw2-ali-mode pw2-ru-mode pw2-wan pw2-device pw2-lan pw2-ads pw2-update; do cp "$PW2_DIR/$t" /usr/bin/$t 2>/dev/null && chmod +x /usr/bin/$t; done
 
   [ -f "$PW2_DIR/pw2-geosite" ] && cp "$PW2_DIR/pw2-geosite" /usr/bin/pw2-geosite && chmod +x /usr/bin/pw2-geosite
   /usr/bin/pw2-geosite merge >/dev/null 2>&1                     # российская база рекламы -> geosite.dat
