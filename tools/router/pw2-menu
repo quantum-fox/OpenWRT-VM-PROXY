@@ -1,14 +1,21 @@
 #!/bin/sh
 # pw2-menu (команда pw2) - текстовое меню управления роутером прямо в консоли OpenWrt (по SSH или в консоли VM): выбирайте пункты цифрами, команды вводить не нужно.
-#   pw2            - открыть меню
+#   pw2            - открыть меню (на консоли виртуальной машины само включается транслит: там нет русского шрифта)
+#   pw2 --lat      - меню латиницей (то же, что ввод через pw2-lat), pw2 --ru - принудительно русский
 # Все пункты вызывают обычные команды (pw2-exit, pw2-ru-mode, pw2-ali-mode, pw2-ads, pw2-device, pw2-wan, pw2-lan, pw2-update); их можно вводить и вручную - справочник docs/commands.md.
-ask() { printf '%s' "$1"; read -r ANS; }
-pause() { printf '\nEnter - назад '; read -r _; }
+# консоль VM (не SSH, TERM=linux) без русского шрифта показывает квадраты: прогоняем всё через pw2-lat; промпты тогда идут с переводом строки (фильтр построчный)
+case "$1" in --lat) LAT=1;; --ru) LAT=0;; *) if [ -z "$SSH_CONNECTION$SSH_TTY" ] && [ "$TERM" = linux ]; then LAT=1; else LAT=0; fi;; esac
+if [ "$LAT" = 1 ] && [ -z "$PW2_FILTERED" ] && [ -x /usr/bin/pw2-lat ]; then
+  PW2_FILTERED=1 sh "$0" --ru | /usr/bin/pw2-lat; exit 0
+fi
+if [ -n "$PW2_FILTERED" ]; then NL='\n'; else NL=''; fi
+ask() { printf "%s$NL" "$1"; read -r ANS; }
+pause() { printf "\nEnter - назад$NL "; read -r _; }
 title() { echo; echo "=== $1 ==="; }
 pick_mode() { # $1 = pool|chain: список с номерами и выбор действия
   while :; do
     title "$([ "$1" = pool ] && echo 'Выход для 1080/8080 и системного трафика' || echo 'Первый хоп для рабочего выхода 1081/8081')"
-    pw2-exit list "$1"; echo; pw2-exit status | sed -n "$([ "$1" = pool ] && echo 1 || echo 2)p"
+    pw2-exit list "$1"; echo; ST=$(pw2-exit status); echo "$ST" | sed -n "$([ "$1" = pool ] && echo 1 || echo 2)p"
     echo
     echo "  номер  - закрепить этот сервер (не будет меняться сам)"
     echo "  n      - следующий доступный сервер"
@@ -84,7 +91,7 @@ menu_chk() {
 while :; do
   clear 2>/dev/null
   echo "======== pw2: управление роутером ($(cat /etc/pw2-version 2>/dev/null)) ========"
-  pw2-exit status | sed -n 1,2p; pw2-ru-mode status | head -1
+  ST=$(pw2-exit status); echo "$ST" | sed -n 1,2p; RS=$(pw2-ru-mode status); echo "$RS" | sed -n 1p
   echo
   echo "  1) Состояние и проверка выходов"
   echo "  2) Выбор сервера для 1080/8080"
