@@ -14,7 +14,7 @@ cur=$(sed -n 's/^RU_ACTION="\(.*\)".*/\1/p' "$CONF" | head -1); cur=${cur:-_dire
 POOLCONF=/etc/pw2-pool.conf
 build_chain() {   # создаёт/обновляет узел ru_chain = копия российского узла подписки с первым хопом через пул; код возврата: 0 без изменений, 10 изменён, 1 ошибка
   MATCH=$(sed -n 's/^RU_CHAIN_MATCH="\(.*\)".*/\1/p' "$CONF" | head -1); MATCH=${MATCH:-Russia}
-  HOP=$(sed -n 's/^POOL_NODE="\(.*\)".*/\1/p' "$POOLCONF" 2>/dev/null | head -1); HOP=${HOP:-pool_ping}
+  HOP=$(/usr/bin/pw2-exit effective 2>/dev/null); HOP=${HOP:-pool_ping}   # выход пула: закреплённый сервер (pw2-exit) или балансировщик
   [ -n "$(uci -q get passwall2.$HOP)" ] || { echo "нет узла-пула $HOP (сначала pw2-setup)"; return 1; }
   SRC=""
   for id in $(uci show passwall2 | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do

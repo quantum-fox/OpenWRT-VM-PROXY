@@ -19,14 +19,14 @@ uci set $C.$POOL.type='Xray'
 uci set $C.$POOL.protocol='_balancing'
 uci set $C.$POOL.group='own'
 uci set $C.$POOL.balancingStrategy='leastPing'
-uci set $C.$POOL.probeInterval='1m'
+uci set $C.$POOL.probeInterval='2m'
 uci -q get $C.$POOL_CHAIN >/dev/null || uci set $C.$POOL_CHAIN=nodes
 uci set $C.$POOL_CHAIN.remarks='POOL chain (first hop)'
 uci set $C.$POOL_CHAIN.type='Xray'
 uci set $C.$POOL_CHAIN.protocol='_balancing'
 uci set $C.$POOL_CHAIN.group='own'
 uci set $C.$POOL_CHAIN.balancingStrategy='leastPing'
-uci set $C.$POOL_CHAIN.probeInterval='1m'
+uci set $C.$POOL_CHAIN.probeInterval='2m'
 uci commit $C
 PW2_NO_UPDATE=1 /usr/bin/pw2-pool-sync        # заполняет balancing_node
 

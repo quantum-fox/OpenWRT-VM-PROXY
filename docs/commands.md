@@ -17,6 +17,8 @@
 | `pw2-ads update` | скачать свежие базы рекламы из релиза репозитория `OpenWRT-VM-PROXY-ads` (проверка SHA256, подключение, применение правил); можно раз в неделю-месяц — [routing-rules.md](routing-rules.md) |
 | `pw2-geosite status`, `pw2-geosite refresh` | какие базы рекламы подключены к `geosite.dat` / пересобрать `geosite.dat` из чистой основы и файлов `data/` — [routing-rules.md](routing-rules.md) |
 | `pw2-ads status`, `pw2-ads on`, `pw2-ads off`, `pw2-ads allow <домен>` | блокировка рекламы и трекеров: состояние / включить / выключить / разблокировать свой домен — [routing-rules.md](routing-rules.md) |
+| `pw2-exit <команда>` | выбор сервера вручную: `status`, `list`, `set pool|chain СЕРВЕР`, `next`, `best`, `auto`, `probe ИНТЕРВАЛ`, `check СЕКУНДЫ` — [manual-exit.md](manual-exit.md) |
+| `pw2` | меню управления в консоли роутера — [gui.md](gui.md) |
 | `pw2-lan <команда>` | физический порт отдельной сетью роутера (устройства получают интернет через прокси без настройки): `status`, `add ПОРТ [АДРЕС/ПРЕФИКС] [dhcp|nodhcp]`, `del ПОРТ` — [devices.md](devices.md), [no-windows.md](no-windows.md) |
 | `pw2-device <команда>` | свой выход для отдельных устройств/портов: `list`, `set ИМЯ ИСТОЧНИК pool|work|direct`, `del ИМЯ`, `on`, `off` - [devices.md](devices.md) |
 | `pw2-wan <режим>` | откуда интернет роутеру: `status`, `usb` (телефон в режиме «USB-модем»), `eth [ИМЯ]` (сетевая карта), `hook` — [proxmox-usb-modem.md](proxmox-usb-modem.md) |
@@ -60,6 +62,7 @@ curl.exe --noproxy "*" https://icanhazip.com                  # системны
 | `gateway-on.cmd` / `gateway-off.cmd` | включить / выключить прозрачный шлюз (маршруты 0/1 и 128/1 через `10.99.77.1`, DNS на роутер) |
 | `install-watchdog-task.ps1` (админ) | задача `OpenWRT-Gateway-Watchdog`: автозапуск VM, поддержание шлюза, fail-open |
 | `ru-mode.cmd <режим>`, `ru-direct.cmd`, `ru-proxy.cmd`, `ru-chain.cmd` | то же, что `pw2-ru-mode`, с Windows; `ru-direct.cmd`, `ru-proxy.cmd`, `ru-chain.cmd` - «кнопки» двойным щелчком |
+| `pw2-gui` (`tools/gui`) | окно управления для Windows и Linux — [gui.md](gui.md) |
 | `lan-port.ps1` | (Windows, от администратора) проводной порт компьютера в сеть роутера для других устройств; `-Address`, `-Remove` — [devices.md](devices.md), раздел 2.2 |
 | `cn-mode.cmd <режим>` | то же, что `pw2-cn-mode` (`status`, `auto`, `direct`, `proxy`), с Windows |
 | `vscode-proxy.ps1 -On` / `vscode-proxy.ps1 -Off` | включить / выключить VS Code через рабочий выход 8081 |

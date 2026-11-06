@@ -1,0 +1,145 @@
+#!/bin/sh
+# pw2-exit - выбор сервера вручную: выход для 1080/8080 (и системного трафика) и первый хоп цепочки для 1081/8081; закрепление (заморозка) выбора; частота проверок.
+#   pw2-exit status                      - что выбрано сейчас и как часто идут проверки
+#   pw2-exit list [pool|chain]           - серверы с номерами и временем соединения (мс); pool = выход 1080/8080, chain = первый хоп 8081 (по умолчанию оба списка)
+#   pw2-exit set pool|chain СЕРВЕР       - закрепить сервер: НОМЕР из list, часть имени или ID. Сервер НЕ меняется сам, пока вы не скажете (ни проверок пула, ни переключений)
+#   pw2-exit next pool|chain             - перейти на следующий ДОСТУПНЫЙ сервер списка (по кругу)
+#   pw2-exit best pool|chain             - закрепить самый быстрый по времени соединения
+#   pw2-exit auto [pool|chain]           - снова автоматический выбор (пул leastPing); без параметра - оба
+#   pw2-exit probe ИНТЕРВАЛ              - как часто Xray проверяет серверы пула в автоматическом режиме (30s, 1m, 2m, 5m ...); по умолчанию 2m
+#   pw2-exit check СЕКУНДЫ               - как часто автопереключение порта 1081 проверяет рабочий выход (по умолчанию 10)
+# Закрепление хранится ПО ИМЕНИ (ID серверов подписки меняются при её обновлении) в /etc/pw2-exit.conf; если закреплённого сервера нет в обновлённой подписке, выбор возвращается в автоматический (запись в логе pw2-pool-sync).
+# Для закреплённого сервера балансировщик не используется: нет проверок пула, нет переключений - меньше нагрузки на VM; если сервер упал, переключения не будет, пока вы не выберете другой (pw2-exit next).
+# Служебные: apply-uci (вызывается из pw2-routing-apply и pw2-pool-sync), refresh, env, nodes (машинный вывод для программ).
+C=passwall2
+CONF=/etc/pw2-exit.conf
+touch "$CONF"
+LOG=/root/pw2-pool-sync.log
+log() { echo "$(date '+%F %T') pw2-exit: $*" >> "$LOG"; }
+get() { sed -n "s/^$1=\"\(.*\)\"\$/\1/p" "$CONF" | head -1; }
+setv() { grep -v "^$1=" "$CONF" > "$CONF.new"; printf '%s="%s"\n' "$1" "$2" >> "$CONF.new"; mv "$CONF.new" "$CONF"; }
+POOL_PIN=$(get EXIT_POOL); CHAIN_PIN=$(get EXIT_CHAIN)
+PROBE=$(get PROBE_INTERVAL); PROBE=${PROBE:-2m}
+CHECK=$(get AUTOSWITCH_SEC); CHECK=${CHECK:-10}
+die() { echo "ОШИБКА: $*" >&2; exit 1; }
+real_nodes() { for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do case "$(uci -q get $C.$id.protocol)" in _*|"") continue;; esac; echo "$id"; done; }
+rem() { uci -q get $C.$1.remarks; }
+addr() { uci -q get $C.$1.address; }
+port() { uci -q get $C.$1.port; }
+# ID по значению "имя|адрес": сначала точное имя, затем адрес
+resolve() {
+  [ -n "$1" ] || return 1
+  r=${1%%|*}; a=${1#*|}
+  for id in $(real_nodes); do [ "$(rem $id)" = "$r" ] && { echo "$id"; return 0; }; done
+  for id in $(real_nodes); do [ "$(addr $id)" = "$a" ] && [ -n "$a" ] && { echo "$id"; return 0; }; done
+  return 1
+}
+usa_id() { for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do [ "$(rem $id)" = "USA-via-pool" ] && { echo "$id"; return; }; done; }
+# кандидаты: узлы балансировщика (как их собирает pw2-pool-sync), отсортированные по имени
+cands() {   # $1 = pool|chain
+  B=pool_ping; [ "$1" = chain ] && B=pool_chain
+  for id in $(uci -q get $C.$B.balancing_node); do [ -n "$(rem $id)" ] && echo "$(rem $id)|$id"; done | sort | sed 's/.*|//'
+}
+# время TCP-соединения в мс по всем кандидатам (параллельно); вывод: id мс
+probe_all() {
+  T=/tmp/pw2-exit.t; rm -rf $T; mkdir -p $T
+  for id in "$@"; do
+    ( h=$(addr $id); p=$(port $id); [ -n "$h" ] && [ -n "$p" ] || exit 0
+      # время TCP-соединения (time_connect) не зависит от того, чем закончится TLS-рукопожатие; curl роутера собран без telnet, а BusyBox nc отвечает "успех" и на недоступный адрес
+      t=$(curl -4sk -m 2 --connect-timeout 2 -o /dev/null -w '%{time_connect}' "https://$h:$p/" 2>/dev/null)
+      echo "$t" | awk '{ if ($1 > 0) { m=int($1*1000+0.5); if (m<1) m=1; printf "%d", m } else printf "-1" }' > $T/$id ) &
+  done
+  wait
+  for id in "$@"; do echo "$id $(cat $T/$id 2>/dev/null || echo -1)"; done
+  rm -rf $T
+}
+ms_of() { echo "$MS" | awk -v i="$1" '$1==i {print $2}'; }
+pinned_id() { if [ "$1" = pool ]; then resolve "$POOL_PIN"; else resolve "$CHAIN_PIN"; fi; }
+conf_key() { [ "$1" = pool ] && echo EXIT_POOL || echo EXIT_CHAIN; }
+restart_pw() { echo "применяю (перезапуск PassWall2, ~10 с)..."; /etc/init.d/passwall2 restart >/dev/null 2>&1; sleep 8; }
+
+# применить в UCI (без перезапуска): выход пула, первый хоп цепочки, интервалы проверок
+apply_uci() {
+  PID=$(pinned_id pool); CID=$(pinned_id chain)
+  [ -n "$POOL_PIN" ] && [ -z "$PID" ] && { log "закреплённый сервер выхода '${POOL_PIN%%|*}' не найден в подписке - автоматический выбор"; setv EXIT_POOL ""; POOL_PIN=""; }
+  [ -n "$CHAIN_PIN" ] && [ -z "$CID" ] && { log "закреплённый первый хоп '${CHAIN_PIN%%|*}' не найден в подписке - автоматический выбор"; setv EXIT_CHAIN ""; CHAIN_PIN=""; }
+  PN=${PID:-pool_ping}; CN=${CID:-pool_chain}
+  [ -n "$(uci -q get $C.$CN)" ] || CN=pool_ping
+  for s in shunt_pool shunt_global; do [ -n "$(uci -q get $C.$s)" ] && uci set $C.$s.default_node="$PN"; done
+  U=$(usa_id); [ -n "$U" ] && uci set $C.$U.preproxy_node="$CN"
+  [ -n "$(uci -q get $C.shunt_usa_b)" ] && uci set $C.shunt_usa_b.default_proxy_tag="$CN"
+  [ -n "$(uci -q get $C.ru_chain)" ] && uci set $C.ru_chain.preproxy_node="$PN"
+  for b in pool_ping pool_chain; do [ -n "$(uci -q get $C.$b)" ] && uci set $C.$b.probeInterval="$PROBE"; done
+  [ -n "$(uci -q get $C.sockB)" ] && uci set $C.sockB.autoswitch_testing_time="$CHECK"
+  uci commit $C
+  echo "$PN $CN" > /etc/pw2-exit.state
+}
+show_pin() {   # $1 = pool|chain
+  v=$([ "$1" = pool ] && echo "$POOL_PIN" || echo "$CHAIN_PIN")
+  if [ -z "$v" ]; then n=$(uci -q get $C.$([ "$1" = pool ] && echo pool_ping || echo pool_chain).balancing_node | wc -w)
+    echo "автоматически: пул leastPing по $n серверам (проверка каждые $PROBE)"
+  else id=$(resolve "$v"); echo "закреплён: ${v%%|*} ($(addr $id)) - не меняется сам"; fi
+}
+sel() {   # $1 = pool|chain, $2 = номер / часть имени / ID -> id
+  L=$(cands $1); q=$2
+  case "$q" in *[!0-9]*|"") ;; *) echo "$L" | sed -n "${q}p" | grep . && return 0 ;; esac
+  for id in $(real_nodes); do [ "$id" = "$q" ] && { echo $id; return 0; }; done
+  m=""; for id in $(real_nodes); do rem $id | grep -qiF -- "$q" && m="$m $id"; done
+  set -- $m
+  [ $# -eq 1 ] && { echo $1; return 0; }
+  [ $# -gt 1 ] && { echo "ОШИБКА: под '$q' подходит несколько серверов, уточните или укажите номер:" >&2; for i in $m; do echo "  $(rem $i)" >&2; done; return 1; }
+  echo "ОШИБКА: сервер '$q' не найден" >&2; return 1
+}
+pin() {   # $1 = pool|chain, $2 = id
+  setv "$(conf_key $1)" "$(rem $2)|$(addr $2)"
+  POOL_PIN=$(get EXIT_POOL); CHAIN_PIN=$(get EXIT_CHAIN)
+  apply_uci; restart_pw
+  echo "$([ "$1" = pool ] && echo 'выход 1080/8080' || echo 'первый хоп 8081'): $(rem $2) ($(addr $2)) - закреплён"
+}
+need_kind() { case "$1" in pool|chain) ;; *) die "укажите pool (выход 1080/8080) или chain (первый хоп 8081)";; esac; }
+
+case "$1" in
+  status|"")
+    echo "выход 1080/8080 и система: $(show_pin pool)"
+    echo "первый хоп для 1081/8081:  $(show_pin chain)"
+    echo "проверки: пул Xray - каждые $PROBE (только в автоматическом режиме); автопереключение 1081 - каждые $CHECK с" ;;
+  list)
+    KINDS=${2:-"pool chain"}
+    for k in $KINDS; do
+      need_kind $k; L=$(cands $k); MS=$(probe_all $L); PIDK=$(pinned_id $k)
+      echo "== $([ $k = pool ] && echo 'выход 1080/8080 (кандидаты пула)' || echo 'первый хоп 8081'):"
+      n=0; for id in $L; do n=$((n+1)); m=$(ms_of $id); [ "$m" = "-1" ] && m="нет ответа" || m="${m} мс"
+        echo "  $n. $(rem $id) | $(addr $id):$(port $id) | $m$([ "$id" = "$PIDK" ] && echo '   <- закреплён')"; done
+    done ;;
+  nodes)   # машинный вывод: ТИП|НОМЕР|ID|ИМЯ|АДРЕС|ПОРТ|МС|ЗАКРЕПЛЁН(1/0)
+    for k in pool chain; do L=$(cands $k); MS=$(probe_all $L); PIDK=$(pinned_id $k); n=0
+      for id in $L; do n=$((n+1)); echo "$k|$n|$id|$(rem $id)|$(addr $id)|$(port $id)|$(ms_of $id)|$([ "$id" = "$PIDK" ] && echo 1 || echo 0)"; done
+    done ;;
+  set) need_kind $2; [ -n "$3" ] || die "укажите сервер (номер из pw2-exit list, часть имени или ID)"
+    id=$(sel $2 "$3") || exit 1; pin $2 $id ;;
+  best) need_kind $2; L=$(cands $2); MS=$(probe_all $L)
+    b=$(echo "$MS" | awk '$2>0 {print $2" "$1}' | sort -n | head -1 | cut -d' ' -f2); [ -n "$b" ] || die "ни один сервер не отвечает"
+    pin $2 $b ;;
+  next) need_kind $2; L=$(cands $2); MS=$(probe_all $L); CUR=$(pinned_id $2)
+    ALIVE=$(for id in $L; do [ "$(ms_of $id)" -gt 0 ] 2>/dev/null && echo $id; done)
+    [ -n "$ALIVE" ] || die "ни один сервер не отвечает"
+    nx=""; if [ -n "$CUR" ]; then take=0; for id in $L; do
+        if [ $take = 1 ] && echo "$ALIVE" | grep -qx "$id"; then nx=$id; break; fi
+        [ "$id" = "$CUR" ] && take=1; done; fi
+    [ -n "$nx" ] || nx=$(echo "$ALIVE" | grep -vx "${CUR:-none}" | head -1)
+    [ -n "$nx" ] || nx=$(echo "$ALIVE" | head -1)
+    pin $2 $nx ;;
+  auto)
+    case "$2" in pool) setv EXIT_POOL "";; chain) setv EXIT_CHAIN "";; ""|all) setv EXIT_POOL ""; setv EXIT_CHAIN "";; *) die "pool, chain или без параметра";; esac
+    POOL_PIN=$(get EXIT_POOL); CHAIN_PIN=$(get EXIT_CHAIN); apply_uci; restart_pw; "$0" status ;;
+  probe) [ -n "$2" ] || die "укажите интервал, например 2m"; case "$2" in [0-9]*[smh]) ;; *) die "формат: число и s/m/h, например 90s, 2m";; esac
+    setv PROBE_INTERVAL "$2"; PROBE=$2; apply_uci; restart_pw; "$0" status ;;
+  check) case "$2" in ""|*[!0-9]*) die "укажите секунды числом, например 10";; esac
+    setv AUTOSWITCH_SEC "$2"; CHECK=$2; apply_uci; restart_pw; "$0" status ;;
+  apply-uci) apply_uci ;;
+  refresh)   # после обновления подписки: пересчитать ID закреплённых серверов; код 10 = в UCI что-то изменилось (нужен перезапуск PassWall2)
+    old=$(cat /etc/pw2-exit.state 2>/dev/null); apply_uci; [ "$old" = "$(cat /etc/pw2-exit.state)" ] && exit 0; exit 10 ;;
+  env) echo "PROBE_INTERVAL='$PROBE'; AUTOSWITCH_SEC='$CHECK'" ;;
+  effective) pinned_id pool || echo pool_ping ;;
+  *) echo "Использование: pw2-exit status|list [pool|chain]|set pool|chain СЕРВЕР|next pool|chain|best pool|chain|auto [pool|chain]|probe ИНТЕРВАЛ|check СЕКУНДЫ"; exit 1 ;;
+esac

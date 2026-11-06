@@ -93,8 +93,11 @@ sync_pool() {   # $1 = имя узла-балансировщика, $2 = фай
 sync_pool "$POOL_NODE" "$NEW"
 sync_pool "$POOL_CHAIN_NODE" "$NEWC"
 
-# --- цепочка для российских ресурсов (pw2-ru-mode chain): узел ru_chain - копия российского узла подписки, пересобираем после обновления подписки
 RU_CHANGED=0
+# --- закреплённые серверы (pw2-exit): у серверов подписки после обновления новые ID - пересчитать
+if [ -x /usr/bin/pw2-exit ]; then /usr/bin/pw2-exit refresh; [ $? = 10 ] && { RU_CHANGED=1; log "закреплённые серверы пересчитаны (pw2-exit)"; }; fi
+
+# --- цепочка для российских ресурсов (pw2-ru-mode chain): узел ru_chain - копия российского узла подписки, пересобираем после обновления подписки
 if [ "${RU_ACTION:-_direct}" = "ru_chain" ] && [ -x /usr/bin/pw2-ru-mode ]; then
   /usr/bin/pw2-ru-mode refresh; rc=$?
   [ $rc = 10 ] && { RU_CHANGED=1; log "российская цепочка (ru_chain) обновлена по подписке"; }

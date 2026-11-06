@@ -63,7 +63,7 @@ ensure USA_BACKUP '# Запасной USA для 8081/1081: 1 = при отка�
 # Работает штатное автопереключение SOCKS-инстанса PassWall2 (проверка реальным запросом через порт 1081). Запасной узел ищется в группе подписки по имени (egrep): USA_BACKUP_GROUP / USA_BACKUP_MATCH (ниже).
 USA_BACKUP=1
 USA_PROBE_URL="https://www.google.com/generate_204"   # проверочный адрес; запрос идёт ЧЕРЕЗ 1081, т.е. через USA
-USA_CHECK_INTERVAL=5       # секунд между проверками (быстрое обнаружение отказа: ~25-30 с до переключения)
+USA_CHECK_INTERVAL=10      # секунд между проверками (с версии 1.11.0 задаётся командой pw2-exit check; здесь значение только для первой установки)
 USA_CHECK_TIMEOUT=3        # таймаут одной попытки, с
 USA_CHECK_RETRY=1          # повторов при неудаче (две попытки подряд защищают от разовых провалов)'
 BG=$(. /etc/pw2-pool.conf 2>/dev/null; echo "$INCLUDE_GROUPS")      # группа подписки = та же, что у пула
@@ -187,6 +187,7 @@ else
   uci set $C.sockB.enable_autoswitch='0'
 fi
 uci set $C.@global[0].node="$SYS_NODE"
+[ -x /usr/bin/pw2-exit ] && /usr/bin/pw2-exit apply-uci      # закреплённые серверы (pw2-exit), интервалы проверок
 uci commit $C
 
 /etc/init.d/passwall2 restart >/dev/null 2>&1

@@ -3,6 +3,7 @@
 #   pw2-device list                       - правила по устройствам
 #   pw2-device set ИМЯ ИСТОЧНИК РЕЖИМ     - создать или изменить правило
 #   pw2-device del ИМЯ                    - удалить правило
+#   pw2-device rules                      - то же в машинном виде (для программ)
 #   pw2-device on | off                   - включить / выключить выбор выхода по устройствам (правила сохраняются)
 # ИСТОЧНИК: IP-адрес (10.99.77.50), диапазон адресов (10.99.77.50-10.99.77.60), подсеть (10.99.77.64/28), MAC-адрес (aa:bb:cc:dd:ee:ff) или интерфейс if:ИМЯ (например if:eth2 - всё, что подключено к этому порту/мосту); несколько - через запятую.
 # РЕЖИМ: pool   - через пул, как у остальных (правила RU/CN/UA, блокировка рекламы) - узел shunt_pool
@@ -25,6 +26,12 @@ case "$1" in
       echo "  $(uci -q get $C.$s.remarks | sed 's/^pw2: //'): источник [${src}${i:+ интерфейс $i}] -> $r$([ "$(uci -q get $C.$s.enabled)" = 1 ] || echo ' (выключено)')"
     done
     [ $n = 0 ] && echo "  правил нет (все устройства идут через пул по умолчанию)" ;;
+  rules)   # машинный вывод для программ: первая строка ENABLED=0|1, далее ИМЯ|ИСТОЧНИК|ИНТЕРФЕЙС|РЕЖИМ(pool/work/direct)|ВКЛ(1/0)
+    echo "ENABLED=$([ "$(uci -q get $C.@global[0].acl_enable)" = 1 ] && echo 1 || echo 0)"
+    for s in $(uci show $C | grep '^passwall2\.pw2dev_.*=acl_rule' | cut -d. -f2 | cut -d= -f1); do
+      m=$(uci -q get $C.$s.mode); [ "$m" = 0 ] && r=direct || { [ "$(uci -q get $C.$s.node)" = shunt_usa ] && r=work || r=pool; }
+      echo "$(uci -q get $C.$s.remarks | sed 's/^pw2: //')|$(uci -q get $C.$s.sources)|$(uci -q get $C.$s.interface)|$r|$(uci -q get $C.$s.enabled)"
+    done ;;
   set)
     [ $# -eq 4 ] || die "использование: pw2-device set ИМЯ ИСТОЧНИК pool|work|direct"
     name=$2; src=$3; mode=$4; s=$(sid "$name")

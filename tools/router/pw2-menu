@@ -1,0 +1,109 @@
+#!/bin/sh
+# pw2-menu (команда pw2) - текстовое меню управления роутером прямо в консоли OpenWrt (по SSH или в консоли VM): выбирайте пункты цифрами, команды вводить не нужно.
+#   pw2            - открыть меню
+# Все пункты вызывают обычные команды (pw2-exit, pw2-ru-mode, pw2-ali-mode, pw2-ads, pw2-device, pw2-wan, pw2-lan, pw2-update); их можно вводить и вручную - справочник docs/commands.md.
+ask() { printf '%s' "$1"; read -r ANS; }
+pause() { printf '\nEnter - назад '; read -r _; }
+title() { echo; echo "=== $1 ==="; }
+pick_mode() { # $1 = pool|chain: список с номерами и выбор действия
+  while :; do
+    title "$([ "$1" = pool ] && echo 'Выход для 1080/8080 и системного трафика' || echo 'Первый хоп для рабочего выхода 1081/8081')"
+    pw2-exit list "$1"; echo; pw2-exit status | sed -n "$([ "$1" = pool ] && echo 1 || echo 2)p"
+    echo
+    echo "  номер  - закрепить этот сервер (не будет меняться сам)"
+    echo "  n      - следующий доступный сервер"
+    echo "  b      - самый быстрый сейчас"
+    echo "  a      - автоматический выбор (пул)"
+    echo "  r      - обновить список"
+    echo "  0      - назад"
+    ask "Ваш выбор: "
+    case "$ANS" in
+      0|"") return ;;
+      n) pw2-exit next "$1" ;;
+      b) pw2-exit best "$1" ;;
+      a) pw2-exit auto "$1" ;;
+      r) ;;
+      *[!0-9]*) echo "Не понял: $ANS" ;;
+      *) pw2-exit set "$1" "$ANS" ;;
+    esac
+  done
+}
+menu_ru() {
+  while :; do
+    title "Российские ресурсы"; pw2-ru-mode status | head -1
+    echo "  1) напрямую (обычный режим)"; echo "  2) всё через пул (если оператор режет российские адреса)"
+    echo "  3) через цепочку пул -> российский сервер"; echo "  0) назад"; ask "Ваш выбор: "
+    case "$ANS" in 1) pw2-ru-mode direct;; 2) pw2-ru-mode proxy;; 3) pw2-ru-mode chain;; 0|"") return;; esac
+  done
+}
+menu_ali() {
+  while :; do
+    title "AliExpress / Alibaba"; pw2-ali-mode status | head -1
+    echo "  1) напрямую"; echo "  2) через пул"; echo "  0) назад"; ask "Ваш выбор: "
+    case "$ANS" in 1) pw2-ali-mode direct;; 2) pw2-ali-mode pool;; 0|"") return;; esac
+  done
+}
+menu_ads() {
+  while :; do
+    title "Блокировка рекламы"; pw2-ads status | head -3
+    echo "  1) включить"; echo "  2) выключить"; echo "  3) обновить базы из интернета"; echo "  4) разблокировать домен"; echo "  0) назад"; ask "Ваш выбор: "
+    case "$ANS" in 1) pw2-ads on;; 2) pw2-ads off;; 3) pw2-ads update;; 4) ask "Домен: "; [ -n "$ANS" ] && pw2-ads allow "$ANS";; 0|"") return;; esac
+  done
+}
+menu_dev() {
+  while :; do
+    title "Выход для отдельных устройств"; pw2-device list
+    echo "  1) добавить правило"; echo "  2) удалить правило"; echo "  3) включить выбор по устройствам"; echo "  4) выключить"; echo "  0) назад"; ask "Ваш выбор: "
+    case "$ANS" in
+      1) ask "Имя правила (например tv): "; N=$ANS
+         ask "Источник (IP, диапазон, подсеть, MAC или if:порт): "; S=$ANS
+         ask "Выход: pool (пул) / work (рабочий сервер) / direct (напрямую): "; [ -n "$N" ] && [ -n "$S" ] && pw2-device set "$N" "$S" "$ANS" ;;
+      2) ask "Имя правила: "; [ -n "$ANS" ] && pw2-device del "$ANS" ;;
+      3) pw2-device on ;; 4) pw2-device off ;; 0|"") return ;;
+    esac
+  done
+}
+menu_net() {
+  while :; do
+    title "Сеть"; pw2-wan status | head -4; echo; pw2-lan status | head -6
+    echo "  1) WAN через телефон по USB"; echo "  2) WAN через сетевую карту"; echo "  3) подключить порт как сеть роутера (pw2-lan add)"; echo "  4) отключить порт (pw2-lan del)"; echo "  0) назад"; ask "Ваш выбор: "
+    case "$ANS" in
+      1) pw2-wan usb;; 2) pw2-wan eth;;
+      3) ask "Порт (например eth2): "; P=$ANS; ask "Адрес роутера в сети порта (Enter - 10.99.88.1 с DHCP; или 192.168.100.1/24 для статических устройств): "; [ -n "$P" ] && pw2-lan add "$P" $ANS ;;
+      4) ask "Порт: "; [ -n "$ANS" ] && pw2-lan del "$ANS" ;;
+      0|"") return ;;
+    esac
+  done
+}
+menu_chk() {
+  title "Как часто идут проверки"; pw2-exit status | tail -1
+  echo "Реже проверки - меньше нагрузка на виртуальную машину (в автоматическом режиме)."
+  ask "Проверка пула Xray, например 30s, 2m, 5m (Enter - не менять): "; [ -n "$ANS" ] && pw2-exit probe "$ANS"
+  ask "Проверка рабочего выхода 1081, секунды (Enter - не менять): "; [ -n "$ANS" ] && pw2-exit check "$ANS"
+}
+while :; do
+  clear 2>/dev/null
+  echo "======== pw2: управление роутером ($(cat /etc/pw2-version 2>/dev/null)) ========"
+  pw2-exit status | sed -n 1,2p; pw2-ru-mode status | head -1
+  echo
+  echo "  1) Состояние и проверка выходов"
+  echo "  2) Выбор сервера для 1080/8080"
+  echo "  3) Выбор первого хопа для 1081/8081"
+  echo "  4) Российские ресурсы"
+  echo "  5) AliExpress"
+  echo "  6) Реклама"
+  echo "  7) Выход для отдельных устройств"
+  echo "  8) Сеть (WAN, порты)"
+  echo "  9) Частота проверок"
+  echo "  u) Обновить подписку и пул"
+  echo "  v) Обновление скриптов (pw2-update)"
+  echo "  0) Выход"
+  ask "Ваш выбор: "
+  case "$ANS" in
+    1) title "Состояние"; pw2-setup status; echo; pw2-exit status; pause ;;
+    2) pick_mode pool ;; 3) pick_mode chain ;; 4) menu_ru ;; 5) menu_ali ;; 6) menu_ads ;; 7) menu_dev ;; 8) menu_net ;; 9) menu_chk; pause ;;
+    u) pw2-pool-sync; tail -5 /root/pw2-pool-sync.log; pause ;;
+    v) pw2-update status; ask "Выполнить обновление? (y/n): "; [ "$ANS" = y ] && sh /usr/share/pw2/pw2-update; pause ;;
+    0|q|"") exit 0 ;;
+  esac
+done
