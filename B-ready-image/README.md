@@ -2,6 +2,8 @@
 
 Результат: тот же роутер, что в варианте A, но без сборки: вы импортируете готовую VM и вводите **свои** подписку и сервер. Общая картина и требования — [../README.md](../README.md). Время ~15 минут.
 
+> **Метки.** Перед каждой командой стоит метка, **где** её вводить: 🖥️ **ПК · PowerShell** (на вашем Windows-компьютере), 📡 **Роутер · консоль** (на самом роутере), 🖥️➜📡 **ПК ➜ роутер** (вводится на ПК как `ssh openwrt …`, выполняется на роутере). Таблица всех меток: [../docs/where-to-run.md](../docs/where-to-run.md).
+
 > **Где взять образ.** Файл `image\pw2-router.ova` (35 МБ) в репозиторий не входит: скачайте его со страницы релиза («Releases») вместе с файлом `pw2-router.ova.sha256` и положите в папку `image` рядом с этим файлом (контрольная сумма проверяется при импорте).
 
 ## Что внутри образа
@@ -21,7 +23,7 @@
 Если вы получили продукт архивом `OpenWRT-VM-PROXY-<версия>.zip`, файл `image\pw2-router.ova` уже внутри. Если вы скачали репозиторий с GitHub, образа в нём нет: скачайте `pw2-router.ova` и `pw2-router.ova.sha256` со страницы **Releases** репозитория и положите в папку `image` ([image/README.md](image/README.md)).
 
 ## Шаг 1. Импорт
-PowerShell **от администратора**:
+🖥️ **ПК · PowerShell (админ)**
 ```powershell
 cd <папка OpenWRT-VM-PROXY>\tools\windows
 .\vm-import.ps1
@@ -29,25 +31,29 @@ cd <папка OpenWRT-VM-PROXY>\tools\windows
 Скрипт проверяет контрольную сумму, создаёт Host-Only адаптер `10.99.77.2/24` (LAN роутера), импортирует VM `OpenWRT` и привязывает сети: nic1 — Host-Only, nic2 — мост на ваш внешний адаптер (выбирается автоматически; иначе `-WanAdapter "<имя из VBoxManage list bridgedifs>"`). Если политика выполнения блокирует `.ps1`: `powershell -ExecutionPolicy Bypass -File .\vm-import.ps1`.
 
 ## Шаг 2. Запуск
+🖥️ **ПК · PowerShell**
 ```powershell
 & "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" startvm OpenWRT --type headless
 Test-Connection 10.99.77.1 -Count 2 -Quiet      # через ~1 минуту: True
 ```
 
 ## Шаг 3. Вход по SSH-ключу
+🖥️ **ПК · PowerShell (админ)**
 ```powershell
 .\router-ssh-setup.ps1 -Password pw2-change-me
 ```
-Создаёт ключ `%USERPROFILE%\.ssh\openwrt_router`, алиас `openwrt` и кладёт ключ на роутер. Проверка: `ssh openwrt uname -a`.
+Создаёт ключ `%USERPROFILE%\.ssh\openwrt_router`, алиас `openwrt` и кладёт ключ на роутер. Проверка: 🖥️➜📡 `ssh openwrt uname -a` (вводится на ПК, выполняется на роутере).
 
 ## Шаг 4. Ваши данные
 Подготовьте: адрес подписки, ссылку `vless://…` рабочего сервера (для Reality — **с `flow=xtls-rprx-vision`**, если сервер его требует), по желанию — ссылку второго сервера для пула.
+🖥️➜📡 **ПК ➜ роутер** (вопросы задаёт роутер, отвечаете вы в этом же окне PowerShell)
 ```powershell
 ssh -t openwrt pw2-setup
 ```
-Скрипт: (1) просит задать новый пароль root; (2) спрашивает подписку, рабочий сервер и (необязательно) второй сервер; (3) сохраняет их в `/root/secrets.env` (права 600); (4) скачивает подписку, заменяет заглушки вашими узлами, перестраивает пул, цепочку, правила, прозрачный режим, файрвол и сторож (скрипты `02…08` из `/usr/share/pw2`); (5) печатает проверку. Можно повторять: `ssh openwrt pw2-setup apply` применяет `/root/secrets.env` без вопросов.
+Скрипт: (1) просит задать новый пароль root; (2) спрашивает подписку, рабочий сервер и (необязательно) второй сервер; (3) сохраняет их в `/root/secrets.env` (права 600); (4) скачивает подписку, заменяет заглушки вашими узлами, перестраивает пул, цепочку, правила, прозрачный режим, файрвол и сторож (скрипты `02…08` из `/usr/share/pw2`); (5) печатает проверку. Можно повторять: 🖥️➜📡 `ssh openwrt pw2-setup apply` применяет `/root/secrets.env` без вопросов.
 
 ## Шаг 5. Проверка
+🖥️➜📡 строки с `ssh openwrt` (на ПК ➜ роутер) и 🖥️ строки с `curl.exe` (на ПК)
 ```powershell
 ssh openwrt pw2-setup status
 curl.exe -x socks5h://10.99.77.1:1080 https://icanhazip.com      # IP узла пула
@@ -56,7 +62,7 @@ curl.exe -x socks5h://10.99.77.1:1081 https://icanhazip.com      # IP ВАШЕГ
 Ожидается: пул — IP узла подписки, рабочий — IP вашего сервера, `автопереключение 1081: 1` (если в подписке есть узел с `USA` в имени), `cn-watch: running`, `ua_block: 1`. Если выход 1081 пустой — [../docs/troubleshooting.md](../docs/troubleshooting.md).
 
 ## Шаг 6. Проверить версию
-Образ собран на версии скриптов **1.11.0** (IPv6 выключен, блокировка рекламы включена, полная база рекламы ~205 тыс. доменов, команда `pw2-ads update` для свежих баз). Проверка: `ssh openwrt pw2-update status`. Когда выйдут новые версии — [../docs/update.md](../docs/update.md).
+Образ собран на версии скриптов **1.11.0** (IPv6 выключен, блокировка рекламы включена, полная база рекламы ~205 тыс. доменов, команда `pw2-ads update` для свежих баз). Проверка: 🖥️➜📡 `ssh openwrt pw2-update status`. Когда выйдут новые версии — [../docs/update.md](../docs/update.md).
 
 ## Дальше
 1. Подключите Windows (шлюз, сторож, браузер, VS Code): [../docs/windows-setup.md](../docs/windows-setup.md).
@@ -64,6 +70,6 @@ curl.exe -x socks5h://10.99.77.1:1081 https://icanhazip.com      # IP ВАШЕГ
 3. Как менять правила — [../docs/routing-rules.md](../docs/routing-rules.md); все команды — [../docs/commands.md](../docs/commands.md).
 
 ## Обслуживание
-- Обновить скрипты роутера из этой папки: `.\install-router.ps1`, затем `ssh openwrt pw2-setup apply`.
+- Обновить скрипты роутера из этой папки: 🖥️ `.\install-router.ps1` (на ПК, PowerShell админ), затем 🖥️➜📡 `ssh openwrt pw2-setup apply`.
 - Пакеты (PassWall2, xray) без необходимости не обновляйте: версии совместимы друг с другом; подписка, пул и геобазы обновляются автоматически (`pw2-pool-sync`).
 - Резервная копия: выключите VM и скопируйте её диск (`%USERPROFILE%\VirtualBox VMs\OpenWRT\*.vdi`) — **с копией уйдёт `/root/secrets.env`**, не публикуйте её.

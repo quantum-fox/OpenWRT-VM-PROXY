@@ -47,7 +47,7 @@ ALI_ACTION="_direct"'
 ensure RU_ACTION '# Куда направлять ВСЕ российские ресурсы (домены ru/su/рф, geosite:category-ru и IP России) на 8080/1080 и в системном трафике: _direct = напрямую (по умолчанию), _default = через пул (если оператор при белых списках режет российские адреса); или ID узла PassWall2. Переключать: pw2-ru-mode. На 8081/1081 российские ресурсы блокируются всегда
 RU_ACTION="_direct"'
 ensure RU_CHAIN_MATCH '# Режим pw2-ru-mode chain: по какому слову в имени искать российский узел подписки
-RU_CHAIN_MATCH="Russia"'
+RU_CHAIN_MATCH="Russia|Россия"'
 ensure SYSTEM_MODE '# Прозрачный режим системы (шлюз Win10): same = те же правила, что на 8080/1080 (узел shunt_pool); ua_only = только блок UA, остальное через пул (узел shunt_global)
 SYSTEM_MODE="same"'
 ensure CN_MODE '# Китай напрямую: auto = напрямую, пока Китай доступен с роутера напрямую, иначе через пул (следит pw2-cn-watch, см. 08); direct = всегда напрямую; proxy = всегда через пул
@@ -68,7 +68,7 @@ USA_CHECK_TIMEOUT=3        # таймаут одной попытки, с
 USA_CHECK_RETRY=1          # повторов при неудаче (две попытки подряд защищают от разовых провалов)'
 BG=$(. /etc/pw2-pool.conf 2>/dev/null; echo "$INCLUDE_GROUPS")      # группа подписки = та же, что у пула
 ensure USA_BACKUP_GROUP "USA_BACKUP_GROUP=\"${BG:-subscription}\"   # группа подписки, где ищется запасной USA"
-ensure USA_BACKUP_MATCH 'USA_BACKUP_MATCH="USA"          # регулярное выражение (egrep) по имени узла'
+ensure USA_BACKUP_MATCH 'USA_BACKUP_MATCH="USA|США"          # регулярное выражение (egrep) по имени узла'
 . "$CONF"
 
 id_by_remarks() { for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do [ "$(uci -q get $C.$id.remarks)" = "$1" ] && { echo $id; return; }; done; }

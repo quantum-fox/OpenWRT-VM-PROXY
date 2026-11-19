@@ -1,11 +1,14 @@
 #!/bin/sh
 # 01: пакеты. LuCI + фид PassWall2 + luci-app-passwall2 + xray-core (свежий из фида PassWall2) + модули tproxy.
-# Платформа: OpenWrt 23.05.x, x86_64 (для другой архитектуры замените x86_64 в URL фидов).
+# Платформа: OpenWrt 23.05.x / 24.10.x; архитектура и версия берутся из /etc/openwrt_release (x86_64, aarch64_cortex-a53 для NX31 и т.д.).
 # ВАЖНО: списки opkg лежат в /var/opkg-lists = tmpfs и пропадают после перезагрузки -> перед install всегда opkg update.
 set -e
 B=https://master.dl.sourceforge.net/project/openwrt-passwall-build
-ARCH=x86_64
-REL=packages-23.05
+[ -f /etc/openwrt_release ] && . /etc/openwrt_release
+ARCH=${PW2_ARCH:-$DISTRIB_ARCH}
+REL=${PW2_REL:-packages-$(echo "$DISTRIB_RELEASE" | cut -d. -f1,2)}      # 23.05.6 -> packages-23.05, 24.10.6 -> packages-24.10
+[ -n "$ARCH" ] || { echo "ОШИБКА: не определена архитектура (нет DISTRIB_ARCH в /etc/openwrt_release); задайте PW2_ARCH=..."; exit 1; }
+echo "платформа: $DISTRIB_RELEASE $ARCH, фид PassWall2: $REL"
 
 opkg update
 opkg install luci luci-ssl                      # веб-интерфейс (на образе уже стоял)
@@ -36,7 +39,8 @@ opkg install luci-app-passwall2 luci-i18n-passwall2-ru
 opkg upgrade xray-core                          # версия из фида PassWall2 новее официальной (26.9.x против 24.12.x)
 opkg install kmod-nft-tproxy kmod-nft-socket    # нужны для прозрачного прокси (UDP/TPROXY)
 # телефон в режиме «USB-модем» как WAN (команда pw2-wan; Android: RNDIS/CDC Ethernet): драйверы USB-контроллеров (EHCI/xHCI/UHCI) уже есть в ядре x86_64
-opkg install kmod-usb-net-rndis kmod-usb-net-cdc-ether usbutils
+# ставим только там, где есть USB (на роутерах без USB-порта, например NX31, не нужно)
+if ls /sys/bus/usb/devices 2>/dev/null | grep -q .; then opkg install kmod-usb-net-rndis kmod-usb-net-cdc-ether usbutils; else echo "USB нет - драйверы USB-модема не ставлю"; fi
 
 # перезапуск веб-части, чтобы появился раздел Services -> PassWall 2
 rm -rf /tmp/luci-indexcache /tmp/luci-modulecache

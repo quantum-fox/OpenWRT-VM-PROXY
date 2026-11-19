@@ -1,0 +1,20 @@
+#!/bin/sh
+# pw2-diag - отчёт «нет интернета»: собирает на роутере всё нужное для диагностики в один вывод (без паролей и ссылок подписки).
+#   pw2-diag                 показать отчёт
+#   pw2-diag > /tmp/diag.txt сохранить в файл (потом скопировать/прислать)
+sec() { echo; echo "=== $1"; }
+echo "pw2-diag $(date '+%F %T')  версия скриптов $(cat /etc/pw2-version 2>/dev/null)  OpenWrt $(. /etc/openwrt_release; echo $DISTRIB_RELEASE) $(. /etc/openwrt_release; echo $DISTRIB_ARCH)"; uptime
+sec "WAN и маршрут (есть ли адрес и шлюз)"; ip -4 -br addr | grep -v '^lo'; ip route | head -4
+sec "связь с интернетом без прокси (с самого роутера)"
+ping -c2 -W2 1.1.1.1 2>&1 | tail -2; ping -c2 -W2 8.8.8.8 2>&1 | tail -1
+echo "DNS роутера: $(nslookup example.com 127.0.0.1 2>&1 | grep -A1 'Name:' | tr '\n' ' ')"
+sec "выходы через прокси (должны быть IP, не пусто)"
+echo "1080 (пул):   $(curl -s -m 15 -x socks5h://127.0.0.1:1080 https://icanhazip.com 2>&1 | head -1)"
+echo "1081 (рабочий): $(curl -s -m 15 -x socks5h://127.0.0.1:1081 https://icanhazip.com 2>&1 | head -1)"
+sec "состояние пула и закреплений"; /usr/bin/pw2-exit status 2>&1 | head -4; /usr/bin/pw2-failopen status 2>&1 | head -2
+sec "доступность серверов пула (мс; «нет ответа» = TCP не открылся)"; /usr/bin/pw2-exit list pool 2>&1 | head -40
+sec "службы"; echo "passwall2: $(/etc/init.d/passwall2 status 2>&1 | head -1)  xray процессов: $(ps | grep -c '[x]ray')"; nft list tables 2>/dev/null | head -8
+sec "подписка (число узлов, срок; ссылка не показывается)"; uci -q show passwall2 | grep -E 'subscribe_list|expired_date|rem_traffic' | head -6; echo "узлов в группе subscription: $(uci -q show passwall2 | grep -c "group='subscription'")"
+sec "последние строки лога PassWall2"; tail -25 /tmp/log/passwall2.log 2>/dev/null
+sec "ошибки системного журнала"; logread 2>/dev/null | grep -i -E 'error|fail|crash|denied|no lease|udhcpc' | tail -15
+sec "Wi-Fi"; wifi status 2>/dev/null | grep -E '"(up|disabled)"|"ssid"' | tr -d ' \n'; echo

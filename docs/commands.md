@@ -2,7 +2,11 @@
 
 Роутер: `ssh openwrt` (алиас создаёт `router-ssh-setup.ps1`, вход по ключу; адрес `10.99.77.1`). Скрипты Windows — `tools\windows\` (двойной щелчок по `.cmd`, если ExecutionPolicy блокирует `.ps1`; от администратора там, где указано).
 
-## Роутер
+> **Метки.** 🖥️ **ПК · PowerShell** — команда вводится на вашем Windows-компьютере; 🖥️➜📡 **ПК ➜ роутер** — команда `ssh openwrt "…"` вводится на ПК, а выполняется на роутере; 📡 **Роутер · консоль** — вводится уже на роутере; 🖱️ двойной щелчок; 🌐 браузер. Подробнее: [where-to-run.md](where-to-run.md).
+
+**Как читать этот справочник.** Таблица «Роутер» — это команды, которые вводят **на роутере** (📡, приглашение `root@OpenWrt:~#`, после `ssh openwrt` или в окне VM). С ПК их можно выполнить и одной строкой: 🖥️➜📡 `ssh openwrt "команда"` (для команд с вопросами — `ssh -t openwrt команда`). Таблица «Windows» — команды для ПК: `.ps1` вводятся в PowerShell (админ там, где указано), `.cmd` запускаются двойным щелчком 🖱️.
+
+## 📡 Роутер (вводится на роутере)
 | Команда | Назначение |
 |---|---|
 | `pw2-setup` | ввести ваши данные (подписка, сервер) и применить всё; при первом запуске требует сменить пароль root |
@@ -19,6 +23,9 @@
 | `pw2-ads status`, `pw2-ads on`, `pw2-ads off`, `pw2-ads allow <домен>` | блокировка рекламы и трекеров: состояние / включить / выключить / разблокировать свой домен — [routing-rules.md](routing-rules.md) |
 | `pw2-exit <команда>` | выбор сервера вручную: `status`, `list`, `set pool|chain СЕРВЕР`, `next`, `best`, `auto`, `probe ИНТЕРВАЛ`, `check СЕКУНДЫ` — [manual-exit.md](manual-exit.md) |
 | `pw2` | меню управления в консоли роутера — [gui.md](gui.md) |
+| `pw2-failopen status`, `on`, `off` | что делать, если ни один сервер пула не отвечает: идти напрямую (`on`) или стоять (`off`); кнопка на вкладке «Маршруты» в `pw2-gui` — [manual-exit.md](manual-exit.md) |
+| `pw2-diag` | отчёт «нет интернета» (WAN, DNS, выходы 1080/1081, серверы, подписка, логи) без паролей. **Выполняется на самом роутере** (`ssh root@АДРЕС`, затем `pw2-diag`; или `ssh root@АДРЕС pw2-diag > diag.txt` с компьютера; или кнопка в `pw2-gui`), не в Windows. Результат можно отправлять без опасений: пароли и ссылка подписки в него не попадают |
+| `pw2-lan-ip status`, `set АДРЕС`, `keep` | смена адреса роутера в LAN с автооткатом — [hardware-router.md](hardware-router.md) |
 | `pw2-lan <команда>` | физический порт отдельной сетью роутера (устройства получают интернет через прокси без настройки): `status`, `add ПОРТ [АДРЕС/ПРЕФИКС] [dhcp|nodhcp]`, `del ПОРТ` — [devices.md](devices.md), [no-windows.md](no-windows.md) |
 | `pw2-device <команда>` | свой выход для отдельных устройств/портов: `list`, `set ИМЯ ИСТОЧНИК pool|work|direct`, `del ИМЯ`, `on`, `off` - [devices.md](devices.md) |
 | `pw2-wan <режим>` | откуда интернет роутеру: `status`, `usb` (телефон в режиме «USB-модем»), `eth [ИМЯ]` (сетевая карта), `hook` — [proxmox-usb-modem.md](proxmox-usb-modem.md) |
@@ -35,7 +42,7 @@
 
 Файлы настроек: `/etc/pw2-routing.conf` (после правки — `pw2-routing-apply`), `/etc/pw2-pool.conf`, `/root/secrets.env` (после правки — `pw2-setup apply`).
 
-Диагностика:
+Диагностика, 📡 **Роутер · консоль** (или с ПК: 🖥️➜📡 `ssh openwrt "команда"`):
 ```sh
 logread | tail -50                          # системный журнал
 tail -30 /tmp/log/passwall2.log             # журнал PassWall2
@@ -43,7 +50,7 @@ nft list table inet passwall2 | head -50    # прозрачный прокси
 nft list table inet ua_block | head         # блокировка UA
 grep -c ^processor /proc/cpuinfo; free; uptime
 ```
-Проверка выходов с Windows:
+Проверка выходов с Windows, 🖥️ **ПК · PowerShell** (эти команды вводятся **на ПК**, а не на роутере):
 ```powershell
 curl.exe -x http://10.99.77.1:8080 https://icanhazip.com      # пул
 curl.exe -x http://10.99.77.1:8081 https://icanhazip.com      # рабочий: IP вашего сервера
@@ -51,7 +58,7 @@ curl.exe --noproxy "*" https://icanhazip.com                  # системны
 ```
 Внимание: если в терминале заданы `HTTP(S)_PROXY=…:8081` (после `vscode-proxy.ps1`), простой `curl` идёт через рабочий выход; для системного пути нужен `--noproxy "*"` (он же отключает и явный `-x`).
 
-## Windows (`tools\windows\`)
+## 🖥️ Windows (`tools\windows\`) — вводится на ПК
 | Команда | Назначение |
 |---|---|
 | `vm-create.ps1` (админ) | вариант A: скачать образ OpenWrt, создать VM и сеть |
@@ -70,4 +77,6 @@ curl.exe --noproxy "*" https://icanhazip.com                  # системны
 | `vm-tune.ps1 [-Cpus N] [-Rollback]` (админ) | vCPU / virtio / паравирт. VM (см. [vm-settings.md](vm-settings.md)) |
 
 ## Последовательность установки «с нуля»
+Кто где выполняется: 🖥️ `vm-create.ps1`, 🖥️ `router-ssh-setup.ps1`, 🖥️ `install-router.ps1`, 🖥️ `expand-disk.ps1` — на ПК; 📡 консоль VM — адрес LAN и пароль; `01-packages.sh` и `pw2-setup` — 🖥️➜📡 (`ssh openwrt …`).
+
 `vm-create.ps1` → консоль VM (адрес LAN, пароль) → `router-ssh-setup.ps1` → `install-router.ps1` → `expand-disk.ps1` → `01-packages.sh` → `pw2-setup` (выполняет `02`…`08`) → Windows ([windows-setup.md](windows-setup.md)). Подробно — [A-from-scratch/README.md](../A-from-scratch/README.md).

@@ -20,6 +20,9 @@ uci set $C.$POOL.protocol='_balancing'
 uci set $C.$POOL.group='own'
 uci set $C.$POOL.balancingStrategy='leastPing'
 uci set $C.$POOL.probeInterval='2m'
+# отказоустойчивость пула (pw2-failopen): если ни один узел пула не отвечает, 1080/8080 и системный трафик идут НАПРЯМУЮ (fallbackTag Xray), а не зависают. Выключить: pw2-failopen off
+FO=$(sed -n 's/^POOL_FAILOPEN="\{0,1\}\([01]\).*/\1/p' /etc/pw2-pool.conf 2>/dev/null | head -1)
+if [ "${FO:-1}" = 1 ]; then uci set $C.$POOL.fallback_node='_direct'; else uci -q delete $C.$POOL.fallback_node; fi
 uci -q get $C.$POOL_CHAIN >/dev/null || uci set $C.$POOL_CHAIN=nodes
 uci set $C.$POOL_CHAIN.remarks='POOL chain (first hop)'
 uci set $C.$POOL_CHAIN.type='Xray'

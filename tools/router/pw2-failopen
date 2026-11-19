@@ -1,0 +1,23 @@
+#!/bin/sh
+# pw2-failopen - что делать, если ни один сервер пула не отвечает (подписка закончилась, провайдер блокирует узлы, нет интернета у серверов).
+#   pw2-failopen status   текущий режим
+#   pw2-failopen on       пул недоступен -> 1080/8080, системный трафик и клиенты Wi-Fi/LAN идут НАПРЯМУЮ (интернет не пропадает; российские и китайские сайты и так напрямую)
+#   pw2-failopen off      пул недоступен -> трафик стоит (строгий режим: ничего не уходит мимо прокси)
+# Как работает: у балансировщика пула (pool_ping) задаётся fallback_node=_direct (Xray: fallbackTag=direct). Узлы проверяются раз в 2 минуты (pw2-exit probe), поэтому переход на прямой выход
+# и возврат к пулу происходят в пределах этого интервала. Порт 1081/8081 (рабочий выход через USA) этим не затрагивается: он напрямую не идёт никогда.
+# Не действует, пока выход закреплён вручную (pw2-exit set pool ...): закреплённый сервер работает без балансировщика.
+# При "on" ваш реальный адрес виден сайтам, пока пул недоступен.
+C=passwall2; CONF=/etc/pw2-pool.conf
+P=$(sed -n 's/^POOL_NODE="\(.*\)".*/\1/p' $CONF 2>/dev/null | head -1); P=${P:-pool_ping}
+[ -n "$(uci -q get $C.$P)" ] || { echo "нет узла-пула $P (сначала pw2-setup)"; exit 1; }
+setconf() { grep -q '^POOL_FAILOPEN=' $CONF 2>/dev/null && sed -i "s/^POOL_FAILOPEN=.*/POOL_FAILOPEN=\"$1\"/" $CONF || echo "POOL_FAILOPEN=\"$1\"                # 1 = при недоступном пуле идти напрямую (pw2-failopen), 0 = стоп" >> $CONF; }
+status() {
+  if [ "$(uci -q get $C.$P.fallback_node)" = "_direct" ]; then echo "при недоступном пуле: НАПРЯМУЮ (fail-open включён)"; else echo "при недоступном пуле: СТОП (строгий режим)"; fi
+  [ -x /usr/bin/pw2-exit ] && /usr/bin/pw2-exit status 2>/dev/null | sed -n 1p
+}
+case "$1" in
+  status|"") status ;;
+  on)  uci set $C.$P.fallback_node='_direct'; uci commit $C; setconf 1; echo "применяю (перезапуск PassWall2, ~10 с)..."; /etc/init.d/passwall2 restart >/dev/null 2>&1; sleep 8; status ;;
+  off) uci -q delete $C.$P.fallback_node; uci commit $C; setconf 0; echo "применяю (перезапуск PassWall2, ~10 с)..."; /etc/init.d/passwall2 restart >/dev/null 2>&1; sleep 8; status ;;
+  *) echo "использование: pw2-failopen status|on|off"; exit 1 ;;
+esac

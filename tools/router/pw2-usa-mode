@@ -3,6 +3,8 @@
 #   pw2-usa-mode status   - какой выход сейчас, настройки автопереключения, последние события
 #   pw2-usa-mode backup   - ВРУЧНУЮ закрепить запасной USA (автопереключение отключается; для случая, когда собственный USA нужно обойти намеренно)
 #   pw2-usa-mode auto     - обычный режим: основной USA, при его отказе - автоматически запасной, при восстановлении - обратно
+#   pw2-usa-mode hop on|off|status - основной USA через первый хоп (цепочка пул -> USA, по умолчанию) или напрямую с роутера (off). Меняет только основной USA (USA-via-pool); перезапуск PassWall2 ~10 с.
+#                         Повторный запуск 04-balancer-socks-chain.sh (pw2-setup reset) вернёт цепочку (hop on).
 # Смена режима перезапускает PassWall2 (~10 с).
 C=passwall2
 OWN_ID=""; for id in $(uci show $C | grep '=nodes$' | cut -d. -f2 | cut -d= -f1); do [ "$(uci -q get $C.$id.remarks)" = "USA-via-pool" ] && OWN_ID=$id; done
@@ -17,6 +19,7 @@ case "$1" in
     echo "Выход через 1081 сейчас: ${ip:-<нет>}  -> $side"
     echo "Узел sockB в конфиге:    $(uci -q get $C.sockB.node)   автопереключение: $( [ "$(uci -q get $C.sockB.enable_autoswitch)" = 1 ] && echo "включено (проверка каждые $(uci -q get $C.sockB.autoswitch_testing_time) с, возврат на основной: $( [ "$(uci -q get $C.sockB.autoswitch_restore_switch)" = 1 ] && echo да || echo нет))" || echo ВЫКЛЮЧЕНО )"
     echo "Запасной узел:           shunt_usa_b -> $BK_ID ($BK_NAME, $BK_ADDR)"
+    pw2-usa-mode hop status
     echo "Процесс автопереключателя: $(ps w | grep -c '[s]ocks_auto_switch.sh sockB') шт."
     grep 'Port \[1081\]' /tmp/log/passwall2.log | tail -5 | sed 's/^/  лог: /'
     ;;
@@ -29,5 +32,14 @@ case "$1" in
     pw2-routing-apply | grep -E 'узлы:' ; sleep 2
     echo "Автоматический режим включён."; pw2-usa-mode status
     ;;
-  *) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  hop)
+    case "$2" in
+      on|off)
+        [ -n "$OWN_ID" ] || { echo "нет узла USA-via-pool"; exit 1; }
+        if [ "$2" = on ]; then uci set $C.$OWN_ID.chain_proxy=1; uci set $C.$OWN_ID.preproxy_node=pool_chain; else uci set $C.$OWN_ID.chain_proxy=0; fi
+        uci commit $C; /etc/init.d/passwall2 restart >/dev/null 2>&1; sleep 10
+        echo "Первый хоп для основного USA: $2. Выход через 1081: $(curl -s -m 20 -x socks5h://127.0.0.1:1081 https://icanhazip.com)" ;;
+      *) [ -n "$OWN_ID" ] && echo "Первый хоп для основного USA: $( [ "$(uci -q get $C.$OWN_ID.chain_proxy)" = 1 ] && echo "ВКЛ (пул -> USA, preproxy $(uci -q get $C.$OWN_ID.preproxy_node))" || echo "ВЫКЛ (напрямую)")" ;;
+    esac ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

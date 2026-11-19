@@ -4,11 +4,15 @@
 
 Что изменилось в каждой версии — [../CHANGELOG.md](../CHANGELOG.md).
 
+> **Метки.** 🖥️ **ПК · PowerShell** — вводится на вашем Windows-компьютере; 🖥️➜📡 **ПК ➜ роутер** — `ssh openwrt "…"` вводится на ПК, выполняется на роутере; 📡 **Роутер · консоль** — вводится на самом роутере. Подробнее: [where-to-run.md](where-to-run.md).
+
 ## 0. Коротко
+> 🖱️ **То же без командной строки — в окне `pw2-gui`**, вкладка «Настройка и обновление»: в поле «Папка со скриптами роутера» выберите папку `tools/router` из новой версии, нажмите «Загрузить скрипты на роутер», затем «Обновить скрипты на роутере». Кнопка «Диагностика» там же. Подробно: [gui.md](gui.md), раздел 2.1.
+
 1. Скачайте новую версию продукта (раздел «Releases» репозитория или архив `OpenWRT-VM-PROXY-<версия>.zip`) и распакуйте **в новую папку**.
-2. В PowerShell откройте папку `tools\windows` новой версии и выполните `.\install-router.ps1`.
-3. Выполните `ssh openwrt "sh /usr/share/pw2/pw2-update"`.
-4. Подождите ~2 минуты и проверьте: `ssh openwrt pw2-update status` → «обновление не требуется».
+2. 🖥️ **ПК · PowerShell:** откройте папку `tools\windows` новой версии и выполните `.\install-router.ps1`.
+3. 🖥️➜📡 **ПК ➜ роутер:** `ssh openwrt "sh /usr/share/pw2/pw2-update"`.
+4. Подождите ~2 минуты и проверьте (🖥️➜📡): `ssh openwrt pw2-update status` → «обновление не требуется».
 Остальное — подробности и разбор проблем.
 
 ## 1. Как устроены версии и обновления
@@ -48,14 +52,14 @@
 - (Рекомендуется) Сделайте копию диска VM: выключите VM и скопируйте `%USERPROFILE%\VirtualBox VMs\OpenWRT\*.vdi` (копия содержит ваши данные — не публикуйте её).
 
 ### Шаг 2. Загрузить новые файлы на роутер
-В PowerShell, в папке `tools\windows` **новой** версии:
+🖥️ **ПК · PowerShell**, в папке `tools\windows` **новой** версии:
 ```powershell
 .\install-router.ps1
 ```
 Ожидаемый вывод: `Готово: скрипты загружены в /usr/share/pw2 (NN файлов). Команда на роутере: pw2-setup`. Скрипт кладёт на роутер скрипты, файл `VERSION` и данные (`data\geosite_ADS-GLOBAL.dat`, `data\geosite_ADS-RU.dat` - база рекламы). Если скрипты не запускаются из-за политики выполнения: `powershell -ExecutionPolicy Bypass -File .\install-router.ps1`.
 
 ### Шаг 3. Посмотреть план и выполнить обновление
-Команды выполняются в PowerShell на Windows. **В первый раз** команды `pw2-update` ещё нет в `/usr/bin`, поэтому она запускается из `/usr/share/pw2`:
+Все команды этого шага — 🖥️➜📡 **ПК ➜ роутер** (вводятся в PowerShell на ПК, выполняются на роутере). **В первый раз** команды `pw2-update` ещё нет в `/usr/bin`, поэтому она запускается из `/usr/share/pw2`:
 ```powershell
 ssh openwrt "sh /usr/share/pw2/pw2-update status"
 ```
@@ -82,6 +86,7 @@ ssh openwrt "sh /usr/share/pw2/pw2-update"
 - Дальше команда доступна просто как `pw2-update` (`ssh openwrt pw2-update status`).
 
 ### Шаг 4. Проверить результат
+🖥️➜📡 строки `ssh openwrt …` и 🖥️ строки `curl.exe …` (на ПК)
 ```powershell
 ssh openwrt pw2-update status        # установлена версия = версии скриптов; "обновление не требуется"
 ssh openwrt pw2-setup status         # выходы 1080 и 1081 заданы (IP-адреса)
@@ -93,6 +98,8 @@ curl.exe -s -o NUL -w "%{http_code}" -x http://10.99.77.1:8080 http://doubleclic
 Если сразу после обновления выходы пустые, подождите минуту: пул выбирает лучший узел по пингу (проба раз в минуту).
 
 ### Шаг 5. Скрипты Windows (если в таблице выше «да»)
+Всё здесь — 🖥️ **ПК · PowerShell** (админ).
+
 Скрипты Windows — это папка `tools\windows`: шлюз, сторож, настройка браузера и т. п. После обновления с `1.0.0`:
 - **Если вы распаковали новую версию в ту же папку** (заменили файлы) — больше ничего не нужно: сторож подхватит новые файлы сам в течение минуты.
 - **Если новая версия лежит в другой папке** — от администратора выполните `.\install-watchdog-task.ps1` из `tools\windows` **новой** папки: задача сторожа пересоздаётся с путём к новым скриптам. Старую папку можно удалить после проверки (`Get-ScheduledTask OpenWRT-Gateway-Watchdog` и лог `C:\ProgramData\win-gateway\watchdog.log`).
@@ -111,7 +118,7 @@ IPv6 выключен; включена блокировка рекламы (`pw
 | Всё плохо, нужно вернуться | см. «Откат» ниже |
 
 ### Откат
-1. Вернуть настройки: зайдите на роутер `ssh openwrt` и скопируйте файлы из копий, например: `cp /root/passwall2.before-update-1.0.0-<время> /etc/config/passwall2`; так же для `network`, `dhcp`, `firewall`, `pw2-routing.conf` (`/etc/pw2-routing.conf`), `pw2-pool.conf` (`/etc/pw2-pool.conf`). Затем `/etc/init.d/network restart` и `/etc/init.d/passwall2 restart`. Если связь с роутером пропала — те же команды в консоли VM (окно VirtualBox).
+1. Вернуть настройки: 🖥️ на ПК выполните `ssh openwrt` (вы зашли на роутер, 📡), и там скопируйте файлы из копий, например: `cp /root/passwall2.before-update-1.0.0-<время> /etc/config/passwall2`; так же для `network`, `dhcp`, `firewall`, `pw2-routing.conf` (`/etc/pw2-routing.conf`), `pw2-pool.conf` (`/etc/pw2-pool.conf`). Затем `/etc/init.d/network restart` и `/etc/init.d/passwall2 restart`. Если связь с роутером пропала — те же команды в консоли VM (окно VirtualBox).
 2. Вернуть версию, если хотите повторить шаги: `ssh openwrt "echo 1.0.0 > /etc/pw2-version"` и снова `pw2-update`.
 3. Отдельно: только реклама — `pw2-ads off`; только IPv6 — `pw2-ipv6 on`.
 4. Полный откат — вернуть сохранённую копию диска VM (шаг 1) и старую папку со скриптами.

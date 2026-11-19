@@ -44,6 +44,7 @@ case "$SUB_URL" in
        if [ $HW = 1 ]; then uci set $C.$SUB_SECTION.hwid=1; echo "  без HWID узлов нет - пробую с отправкой HWID (идентификатора устройства)"; else uci -q delete $C.$SUB_SECTION.hwid; fi
        for UA in "" "v2rayN/7.0" "Happ/2.0" "clash-verge/v1.7.7" "Hiddify/2.0" "sing-box" "passwall2"; do
          if [ -n "$UA" ]; then uci set $C.$SUB_SECTION.user_agent="$UA"; else uci -q delete $C.$SUB_SECTION.user_agent; fi
+         uci -q delete $C.$SUB_SECTION.md5       # PassWall2 пропускает обновление, если ответ провайдера не изменился (md5): без сброса узлы с другим именем клиента не подтянутся
          uci commit $C
          lua /usr/share/passwall2/subscribe.lua start $SUB_SECTION manual >/dev/null 2>&1
          cnt=$(good_count)

@@ -2,6 +2,8 @@
 
 Выполняйте после того, как роутер собран и `pw2-setup` показал выходы 1080 и 1081 (варианты A/B). Скрипты — в `tools\windows\` (запуск из PowerShell; если политика выполнения мешает — двойной щелчок по `.cmd` либо `powershell -ExecutionPolicy Bypass -File …`). Все `.ps1` сохранены в **UTF-8 с BOM** — иначе PowerShell 5.1 ломает кириллицу.
 
+> **Метки.** 🖥️ **ПК · PowerShell** — команда вводится на вашем Windows-компьютере; 🖥️➜📡 **ПК ➜ роутер** — команда `ssh openwrt "…"` вводится на ПК, а выполняется на роутере; 📡 **Роутер · консоль** — вводится уже на роутере; 🖱️ двойной щелчок; 🌐 браузер. Подробнее: [where-to-run.md](where-to-run.md).
+
 ## 1. Что получите
 | Трафик | Путь | Выход |
 |---|---|---|
@@ -16,22 +18,24 @@
 ## 2. Шаги (порядок важен)
 
 ### Шаг 1. Проверка связи
+🖥️ **ПК · PowerShell** (первая строка) и 🖥️➜📡 **ПК ➜ роутер** (вторая строка, `ssh openwrt`)
 ```powershell
 Test-Connection 10.99.77.1 -Count 2 -Quiet                 # True
 ssh openwrt 'pw2-setup status'                             # выходы 1080 и 1081 заданы
 ```
 
 ### Шаг 2. (по желанию) VS Code через рабочий выход
+🖥️ **ПК · PowerShell**
 ```powershell
 cd <папка OpenWRT-VM-PROXY>\tools\windows
 .\vscode-proxy.ps1 -On          # делает резервную копию settings.json рядом
 ```
-В VS Code: `Ctrl+Shift+P` → **Developer: Reload Window**. Проверка во встроенном терминале: `echo $env:HTTPS_PROXY` → `http://10.99.77.1:8081`; `curl.exe -s https://icanhazip.com` → IP вашего сервера. Убрать: `.\vscode-proxy.ps1 -Off` (и Reload Window).
+В VS Code: `Ctrl+Shift+P` → **Developer: Reload Window**. Проверка во встроенном терминале VS Code (там PowerShell на ПК): `echo $env:HTTPS_PROXY` → `http://10.99.77.1:8081`; `curl.exe -s https://icanhazip.com` → IP вашего сервера. Убрать: `.\vscode-proxy.ps1 -Off` (и Reload Window).
 Что меняется в `%APPDATA%\Code\User\settings.json`: `http.proxy`, `http.proxySupport=override`, `http.noProxy`, `terminal.integrated.env.windows` (HTTP(S)_PROXY, NO_PROXY), `claudeCode.environmentVariables`.
 
 ### Шаг 3. (по желанию) Рабочий браузер — профиль Firefox
-Вручную: Firefox → Настройки → Параметры сети → **Ручная настройка прокси**: «Узел SOCKS» `10.99.77.1`, порт `1081`, **SOCKS v5**, галка **«Proxy DNS при использовании SOCKS v5»**, «Не использовать прокси для» — `localhost, 127.0.0.1, 10.99.77.1`; остальные поля пустые.
-Скриптом (профиль должен быть закрыт):
+🌐 **Браузер Firefox**, вручную: Настройки → Параметры сети → **Ручная настройка прокси**: «Узел SOCKS» `10.99.77.1`, порт `1081`, **SOCKS v5**, галка **«Proxy DNS при использовании SOCKS v5»**, «Не использовать прокси для» — `localhost, 127.0.0.1, 10.99.77.1`; остальные поля пустые.
+Скриптом (профиль должен быть закрыт), 🖥️ **ПК · PowerShell**:
 ```powershell
 .\firefox-proxy.ps1 -ProfileDir "$env:APPDATA\Mozilla\Firefox\Profiles\<имя профиля>" -Port 1081
 .\firefox-proxy.ps1 -ProfileDir "…" -Off          # убрать
@@ -39,14 +43,14 @@ cd <папка OpenWRT-VM-PROXY>\tools\windows
 Проверка: `https://icanhazip.com` → IP вашего сервера. Остальные профили оставьте «Использовать системные настройки» — они пойдут через шлюз.
 
 ### Шаг 4. Закрыть конфликтующие туннели
-Закройте (через «Выход» в трее, не просто окно) любые VPN/TUN-клиенты: Throne, v2rayN (TUN), Clash, Outline, WireGuard, OpenVPN. Их маршруты конфликтуют со шлюзом; скрипт откажется включаться, если найдёт активный туннель (`-Force` игнорирует проверку). Проверка:
+Закройте (через «Выход» в трее, не просто окно) любые VPN/TUN-клиенты: Throne, v2rayN (TUN), Clash, Outline, WireGuard, OpenVPN. Их маршруты конфликтуют со шлюзом; скрипт откажется включаться, если найдёт активный туннель (`-Force` игнорирует проверку). Проверка, 🖥️ **ПК · PowerShell**:
 ```powershell
 Get-NetAdapter | Where-Object Status -eq Up | Select Name, InterfaceDescription
 Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' | Select ProxyEnable, ProxyServer, AutoConfigURL   # ProxyEnable=0
 ```
 
 ### Шаг 5. Сторож (автозапуск VM и поддержание шлюза)
-PowerShell **от администратора**:
+🖥️ **ПК · PowerShell (админ)**:
 ```powershell
 cd <папка OpenWRT-VM-PROXY>\tools\windows
 .\install-watchdog-task.ps1
@@ -54,13 +58,15 @@ cd <папка OpenWRT-VM-PROXY>\tools\windows
 Создаётся задача `OpenWRT-Gateway-Watchdog` (от вашего пользователя, с повышенными правами, без окна): при входе в Windows и **каждую минуту** она (1) запускает VM `OpenWRT`, если она не работает; (2) если шлюз включён — поддерживает маршруты и DNS; (3) если роутер не отвечает — **fail-open**: выключает шлюз, интернет идёт напрямую; (4) не трогает шлюз при активном туннельном адаптере; (5) если у роутера пропал выход в сеть (нет маршрута по умолчанию 3 минуты подряд, см. [troubleshooting.md](troubleshooting.md), «Роутер не пингует»), корректно перезапускает VM (не чаще раза в 15 минут). Лог: `C:\ProgramData\win-gateway\watchdog.log`.
 
 ### Шаг 6. Включить шлюз
-PowerShell от администратора (или двойной щелчок по `gateway-on.cmd`):
+🖥️ **ПК · PowerShell (админ)** или 🖱️ двойной щелчок по `gateway-on.cmd`:
 ```powershell
 .\gateway-on.ps1
 ```
 Ожидаемо: `Шлюз включён, интернет проверен.` и внешний IP узла пула. Скрипт проверяет роутер, туннели и пересечение подсетей → добавляет маршруты `0.0.0.0/1` и `128.0.0.0/1` через `10.99.77.1` (метрика 1; вместе они перекрывают `0.0.0.0/0`, локальные подсети остаются прямыми) → ставит DNS `10.99.77.1` на внешний и host-only адаптеры → проверяет интернет; если интернета нет — **сам выключает шлюз**. Выключить в любой момент: `.\gateway-off.ps1`. Маршруты хранятся в `ActiveStore` и исчезают при перезагрузке Windows — сторож возвращает их, когда роутер готов.
 
 ### Шаг 7. Проверка результата
+Команды в таблице — 🖥️ **ПК · PowerShell** (строка 6 — 🖥️➜📡 **ПК ➜ роутер**).
+
 | № | Проверка | Ожидание |
 |---|---|---|
 | 1 | `curl.exe --noproxy "*" -s https://icanhazip.com` (в терминале VS Code **обязательно** `--noproxy "*"`) | IP узла пула, **не** IP вашего сервера |
@@ -73,10 +79,13 @@ PowerShell от администратора (или двойной щелчок
 После шагов 1–7 всё работает само. Как это выглядит каждый день, как проверить выход в браузере и что делать при сбое — [daily-use.md](daily-use.md).
 
 ### Шаг 8. Проверка автозапуска и fail-open (один раз)
+Команды — 🖥️ **ПК · PowerShell**; `ssh openwrt poweroff` — 🖥️➜📡 **ПК ➜ роутер**.
 1. Перезагрузите Windows. После входа подождите 2–4 минуты: VM стартует, роутер грузится ~30 с + 20 с на PassWall2, затем сторож включает шлюз. Первые минуты интернет идёт напрямую. `Get-Content C:\ProgramData\win-gateway\watchdog.log -Tail 10`; `Get-NetRoute -NextHop 10.99.77.1 | Select DestinationPrefix`.
 2. Fail-open: `ssh openwrt poweroff` → в течение минуты интернет вернётся напрямую («FAIL-OPEN» в логе), затем сторож запустит VM и снова включит шлюз.
 
 ## 3. Если что-то не работает
+Команды `.\…ps1`, `Get-…`, `ipconfig`, `nslookup` — 🖥️ **ПК · PowerShell** (админ для `.ps1`). Команды `ssh openwrt …` — 🖥️➜📡 **ПК ➜ роутер**.
+
 | Симптом | Что сделать |
 |---|---|
 | После `gateway-on` нет интернета | `.\gateway-off.ps1`; `ssh openwrt pw2-setup status`; `ssh openwrt "tail -30 /tmp/log/passwall2.log"`; при необходимости `ssh openwrt /etc/init.d/passwall2 restart` |
@@ -89,9 +98,10 @@ PowerShell от администратора (или двойной щелчок
 | После смены Wi-Fi нет интернета | подождите ≤1 минуты (сторож вернёт DNS/маршруты); иначе `gateway-off.ps1` → `gateway-on.ps1` |
 | Нужно запустить другой VPN | **сначала** `.\gateway-off.ps1` (иначе сторож продолжит держать маршруты), потом `gateway-on.ps1` |
 
-Если ничего не помогло, соберите: `Get-NetRoute -NextHop 10.99.77.1`, `Get-DnsClientServerAddress`, `Get-Content C:\ProgramData\win-gateway\watchdog.log -Tail 20`, `ssh openwrt "tail -50 /tmp/log/passwall2.log"`.
+Если ничего не помогло, соберите (🖥️ на ПК; строки `ssh openwrt` — 🖥️➜📡): `Get-NetRoute -NextHop 10.99.77.1`, `Get-DnsClientServerAddress`, `Get-Content C:\ProgramData\win-gateway\watchdog.log -Tail 20`, `ssh openwrt "tail -50 /tmp/log/passwall2.log"`.
 
 ## 4. Полный откат
+🖥️ **ПК · PowerShell (админ)** — все строки, кроме `ssh openwrt …` (это 🖥️➜📡 **ПК ➜ роутер**):
 ```powershell
 .\gateway-off.ps1                                                             # маршруты, DNS, флаг
 Unregister-ScheduledTask -TaskName OpenWRT-Gateway-Watchdog -Confirm:$false   # сторож и автозапуск VM (админ)
